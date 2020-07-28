@@ -26,7 +26,7 @@ class TrustedThirdParty:
 
     @staticmethod
     def generate_additive_triple(size0, size1, op, device=None, *args, **kwargs):
-      """Generate multiplicative triples of given sizes"""
+        """Generate multiplicative triples of given sizes"""
         generator = TTPClient.get().generator
 
         a = generate_random_ring_element(size0, generator=generator, device=device)
