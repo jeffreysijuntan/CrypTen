@@ -60,6 +60,7 @@ class DistributedCommunicator(Communicator):
             if total_ws > 1:
                 self.ttp_comm_group = dist.new_group([0, total_ws - 1], backend="nccl")
             self.main_group = dist.new_group(list(range(self.world_size)))
+            self.main_group_nccl = dist.new_group(list(range(self.world_size)))
             self.ttp_initialized = init_ttp
             logging.info("World size = %d" % self.world_size)
 
@@ -184,6 +185,8 @@ class DistributedCommunicator(Communicator):
         """Reduces the input data across all parties; all get the final result."""
         assert dist.is_initialized(), "initialize the communicator first"
 
+        group = self.main_group_nccl
+
         if batched:
             assert isinstance(input, list), "batched reduce input must be a list"
             reqs = []
@@ -191,7 +194,7 @@ class DistributedCommunicator(Communicator):
             for tensor in result:
                 reqs.append(
                     dist.all_reduce(
-                        tensor.data, op=op, group=self.main_group, async_op=True
+                        tensor.data, op=op, group=group, async_op=True
                     )
                 )
             for req in reqs:
@@ -201,7 +204,7 @@ class DistributedCommunicator(Communicator):
                 input.data
             ), "unbatched input for reduce must be a torch tensor"
             result = input.clone()
-            dist.all_reduce(result.data, op=op, group=self.main_group)
+            dist.all_reduce(result.data, op=op, group=group)
         return result
 
     @_logging
