@@ -13,6 +13,8 @@ def replicate_shares(x_share):
     #x_share = x_share.contiguous()
     x_rep = torch.zeros_like(x_share)
 
+    print("yo")
+
     send_group = getattr(comm.get(), f"group{rank}{next_rank}")
     recv_group = getattr(comm.get(), f"group{prev_rank}{rank}")
 
