@@ -181,9 +181,9 @@ class TTPClient:
             message = {"function": func_name, "args": args, "kwargs": kwargs}
             ttp_rank = comm.get().get_ttp_rank()
 
-            comm.get().send_obj(message, ttp_rank, self.comm_group)
+            comm.get().send_obj(message, ttp_rank, self.ttp_group)
 
-            size = comm.get().recv_obj(ttp_rank, self.comm_group)
+            size = comm.get().recv_obj(ttp_rank, self.ttp_group)
             result = torch.empty(size, dtype=torch.long, device=self.device)
             comm.get().broadcast(result, ttp_rank, self.comm_group)
 
@@ -226,7 +226,7 @@ class TTPServer:
         try:
             while True:
                 # Wait for next request from client
-                message = comm.get().recv_obj(0, self.comm_group)
+                message = comm.get().recv_obj(0, self.ttp_group)
                 logging.info("Message received: %s" % message)
 
                 if message == "terminate":
@@ -238,7 +238,7 @@ class TTPServer:
                 kwargs = message["kwargs"]
                 result = getattr(self, function)(*args, **kwargs)
 
-                comm.get().send_obj(result.size(), 0, self.comm_group)
+                comm.get().send_obj(result.size(), 0, self.ttp_group)
                 comm.get().broadcast(result, 2, self.comm_group)
         except RuntimeError:
             logging.info("TTPServer shutting down.")
