@@ -9,7 +9,7 @@ import math
 
 import torch
 
-from . import beaver
+from . import resharing
 
 from crypten.common.util import torch_stack
 
@@ -149,7 +149,7 @@ def ge(x, y):
     return (S ^ P) >> (__BITS - 1)
 
 
-def __linear_circuit_block(x_block, y_block, encode, device=None):
+def __linear_circuit_block(x_block, y_block, encode):
     from .binary import BinarySharedTensor
     ci = torch_stack([torch.zeros_like(x_block), torch.ones_like(y_block)])
 
@@ -160,12 +160,12 @@ def __linear_circuit_block(x_block, y_block, encode, device=None):
         xi, yi = torch_stack([xi, xi]), torch_stack([yi,yi])
 
         si = xi ^ yi ^ ci
-        ci = ci ^ beaver.AND(xi ^ ci, yi ^ ci)
+        ci = ci ^ resharing.AND(xi ^ ci, yi ^ ci)
 
     select_bits = torch.zeros_like(ci[0,0])
     for i in range(8):
-        select_bits = beaver.AND(select_bits ^ 1, ci[0,i]) ^ beaver.AND(select_bits, ci[1,i])
-    sign_bits =  beaver.AND(select_bits ^ 1, si[0,7]) ^ beaver.AND(select_bits, si[1,7])
+        select_bits = resharing.AND(select_bits ^ 1, ci[0,i]) ^ resharing.AND(select_bits, ci[1,i])
+    sign_bits =  resharing.AND(select_bits ^ 1, si[0,7]) ^ resharing.AND(select_bits, si[1,7])
 
     sign_bits = BinarySharedTensor.from_shares(sign_bits.long(), src=comm.get().get_rank())
     sign_bits.encoder = encoder
@@ -173,7 +173,7 @@ def __linear_circuit_block(x_block, y_block, encode, device=None):
     return sign_bits
 
 
-def extract_msb(x, y, device=None):
+def extract_msb(x, y):
     x_block = torch.stack(
         [((x.share >> (i*8)) & 255).byte() for i in range(8)]
     )
@@ -181,17 +181,4 @@ def extract_msb(x, y, device=None):
         [((y.share >> (i*8)) & 255).byte() for i in range(8)]
     )
 
-    return __linear_circuit_block(x_block, y_block, x.encoder, device=device)
-
-
-def get_msb(arithmetic_tensor):
-    binary_tensor = BinarySharedTensor.stack(
-        [
-            BinarySharedTensor(arithmetic_tensor.share, src=i)
-            for i in range(comm.get().get_world_size())
-        ]
-    )
-
-    msb = extract_msb(binary_tensor[0], binary_tensor[1], arithmetic_tensor.device)
-    msb.encoder = arithmetic_tensor.encoder
-    return msb
+    return __linear_circuit_block(x_block, y_block, x.encoder)
