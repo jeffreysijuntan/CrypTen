@@ -10,7 +10,7 @@ def replicate_shares(x_share):
     prev_rank = (rank - 1) % world_size
     next_rank = (rank + 1) % world_size
 
-    x_share = x_share.contiguous()
+    #x_share = x_share.contiguous()
     x_rep = torch.zeros_like(x_share)
 
     send_group = getattr(comm.get(), f"group{rank}{next_rank}")
