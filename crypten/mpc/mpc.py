@@ -541,7 +541,8 @@ class MPCTensor(CrypTensor):
     @mode(Ptype.arithmetic)
     def relu(self):
         """Compute a Rectified Linear function on the input tensor."""
-        return self * circuit.get_msb(self)
+        return self * self.ge(0, _scale=False)
+        #return self * circuit.get_msb(self)
 
     @mode(Ptype.arithmetic)
     def weighted_index(self, dim=None):
