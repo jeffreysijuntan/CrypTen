@@ -9,6 +9,10 @@ import math
 
 import torch
 
+from . import beaver
+
+from crypten.common.util import torch_stack
+
 
 # Cached SPK masks are:
 # [0] -> 010101010101....0101  =                       01 x 32
@@ -143,3 +147,51 @@ def ge(x, y):
     P = ~(x ^ y)
     S, P = __SPK_circuit(S, P)
     return (S ^ P) >> (__BITS - 1)
+
+
+def __linear_circuit_block(x_block, y_block, encode, device=None):
+    from .binary import BinarySharedTensor
+    ci = torch_stack([torch.zeros_like(x_block), torch.ones_like(y_block)])
+
+    for i in range(8):
+        xi = (x_block >> i) & 1
+        yi = (y_block >> i) & 1
+
+        xi, yi = torch_stack([xi, xi]), torch_stack([yi,yi])
+
+        si = xi ^ yi ^ ci
+        ci = ci ^ beaver.AND(xi ^ ci, yi ^ ci)
+
+    select_bits = torch.zeros_like(ci[0,0])
+    for i in range(8):
+        select_bits = beaver.AND(select_bits ^ 1, ci[0,i]) ^ beaver.AND(select_bits, ci[1,i])
+    sign_bits =  beaver.AND(select_bits ^ 1, si[0,7]) ^ beaver.AND(select_bits, si[1,7])
+
+    sign_bits = BinarySharedTensor.from_shares(sign_bits.long(), src=comm.get().get_rank())
+    sign_bits.encoder = encoder
+
+    return sign_bits
+
+
+def extract_msb(x, y, device=None):
+    x_block = torch.stack(
+        [((x.share >> (i*8)) & 255).byte() for i in range(8)]
+    )
+    y_block = torch.stack(
+        [((y.share >> (i*8)) & 255).byte() for i in range(8)]
+    )
+
+    return __linear_circuit_block(x_block, y_block, x.encoder, device=device)
+
+
+def get_msb(arithmetic_tensor):
+    binary_tensor = BinarySharedTensor.stack(
+        [
+            BinarySharedTensor(arithmetic_tensor.share, src=i)
+            for i in range(comm.get().get_world_size())
+        ]
+    )
+
+    msb = extract_msb(binary_tensor[0], binary_tensor[1], arithmetic_tensor.device)
+    msb.encoder = arithmetic_tensor.encoder
+    return msb
