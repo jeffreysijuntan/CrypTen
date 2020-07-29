@@ -20,8 +20,8 @@ def replicate_shares(x_share):
     send_group = getattr(comm.get(), f"group{rank}{next_rank}")
     recv_group = getattr(comm.get(), f"group{prev_rank}{rank}")
 
-    req1 = dist.broadcast(x_share, src=rank, group=send_group, async_op=True)
-    req2 = dist.broadcast(x_rep, src=prev_rank, group=recv_group, async_op=True)
+    req1 = dist.broadcast(x_share.data, src=rank, group=send_group, async_op=True)
+    req2 = dist.broadcast(x_rep.data, src=prev_rank, group=recv_group, async_op=True)
 
     req1.wait()
     req2.wait()
