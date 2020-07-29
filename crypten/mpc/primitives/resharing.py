@@ -3,6 +3,8 @@
 import crypten.communicator as comm
 import torch
 
+import torch.distributed as dist
+
 
 def replicate_shares(x_share):
     rank = comm.get().get_rank()
@@ -18,8 +20,11 @@ def replicate_shares(x_share):
     send_group = getattr(comm.get(), f"group{rank}{next_rank}")
     recv_group = getattr(comm.get(), f"group{prev_rank}{rank}")
 
-    comm.get().broadcast(x_share, src=rank, group=send_group)
-    comm.get().broadcast(x_rep, src=prev_rank, group=recv_group)
+    req1 = dist.broadcast(x_share, src=rank, group=send_group, async_op=True)
+    req2 = dist.broadcast(x_rep, src=prev_rank, group=recv_group, async_op=True)
+
+    req1.wait()
+    req2.wait()
 
     return x_rep
 
