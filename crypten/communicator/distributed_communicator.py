@@ -61,6 +61,12 @@ class DistributedCommunicator(Communicator):
                 self.ttp_comm_group = dist.new_group([0, total_ws - 1], backend="nccl")
             self.main_group = dist.new_group(list(range(self.world_size)))
             self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="nccl")
+
+            if self.world_size == 3:
+                self.group01 = dist.new_group([0, 1], backend="nccl")
+                self.group12 = dist.new_group([1, 2], backend="nccl")
+                self.group20 = dist.new_group([2, 0], backend="nccl")
+
             self.ttp_initialized = init_ttp
             logging.info("World size = %d" % self.world_size)
 

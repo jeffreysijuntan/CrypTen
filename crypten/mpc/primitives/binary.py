@@ -15,7 +15,7 @@ from crypten.common.util import torch_cat, torch_stack
 from crypten.cuda import CUDALongTensor
 from crypten.encoder import FixedPointEncoder
 
-from . import beaver, circuit
+from . import beaver, circuit, resharing
 
 
 SENTINEL = -1
@@ -176,7 +176,10 @@ class BinarySharedTensor(object):
         if is_tensor(y) or isinstance(y, int):
             self.share &= y
         elif isinstance(y, BinarySharedTensor):
-            self.share.set_(beaver.AND(self, y).share.data)
+            if comm.get().get_world_size == 3:
+                self.share.set_(resharing.AND(self, y).share.data)
+            else:
+                self.share.set_(beaver.AND(self, y).share.data)
         else:
             raise TypeError("Cannot AND %s with %s." % (type(y), type(self)))
         return self

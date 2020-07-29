@@ -18,7 +18,7 @@ from crypten.cryptensor import CrypTensor
 from crypten.cuda import CUDALongTensor
 from crypten.encoder import FixedPointEncoder
 
-from . import beaver
+from . import beaver, resharing
 
 
 SENTINEL = -1
@@ -286,9 +286,14 @@ class ArithmeticSharedTensor(object):
             else:  # ['mul', 'matmul', 'convNd', 'conv_transposeNd']
                 # NOTE: 'mul_' calls 'mul' here
                 # Must copy share.data here to support 'mul_' being inplace
-                result.share.set_(
-                    getattr(beaver, op)(result, y, *args, **kwargs).share.data
-                )
+                if comm.get().get_world_size() == 3:
+                    result.share.set_(
+                        getattr(resharing, op)(result, y, *args, **kwargs).share.data
+                    )
+                else:
+                    result.share.set_(
+                        getattr(beaver, op)(result, y, *args, **kwargs).share.data
+                    )
         else:
             raise TypeError("Cannot %s %s with %s" % (op, type(y), type(self)))
 
