@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-
+import crypten
 import crypten.communicator as comm
 import torch
-
-import torch.distributed as dist
+from crypten.common.util import count_wraps
+from crypten.common import rng
 
 
 def replicate_shares(x_share):
