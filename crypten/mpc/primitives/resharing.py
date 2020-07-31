@@ -24,6 +24,8 @@ def replicate_shares(x_share):
     req1.wait()
     req2.wait()
 
+    print("yo")
+
     return x_rep
 
 
