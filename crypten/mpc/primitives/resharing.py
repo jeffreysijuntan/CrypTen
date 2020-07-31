@@ -5,6 +5,8 @@ import torch
 from crypten.common.util import count_wraps
 from crypten.common import rng
 
+import torch.distributed as dist
+
 
 def replicate_shares(x_share):
     rank = comm.get().get_rank()
