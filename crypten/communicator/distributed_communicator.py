@@ -58,9 +58,9 @@ class DistributedCommunicator(Communicator):
             )
             self.ttp_group = dist.new_group(list(range(total_ws)))
             if total_ws > 1:
-                self.ttp_comm_group = dist.new_group([0, total_ws - 1], backend="gloo")
+                self.ttp_comm_group = dist.new_group([0, total_ws - 1], backend="nccl")
             self.main_group = dist.new_group(list(range(self.world_size)))
-            self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="gloo")
+            self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="nccl")
 
             if self.world_size == 3:
                 self.group01 = dist.new_group([0, 1], backend="gloo")
@@ -221,9 +221,9 @@ class DistributedCommunicator(Communicator):
             result = []
             for _ in range(self.get_world_size()):
                 result.append(torch.empty(size=tensor.size(), dtype=torch.long))
-            dist.gather(tensor, result, dst, group=self.main_group)
+            dist.gather(tensor.data, result, dst, group=self.main_group)
             return result
-        dist.gather(tensor, [], dst, group=self.main_group)
+        dist.gather(tensor.data, [], dst, group=self.main_group)
         return [None]
 
     @_logging
