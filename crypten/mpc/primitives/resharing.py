@@ -96,3 +96,26 @@ def AND(x, y):
 
     res = (x1 & y1) ^ (x2 & y1) ^ (x1 & y2)
     return BinarySharedTensor.from_shares(res, src=comm.get().get_rank())
+
+
+def B2A_single_bit(xB):
+    """Converts a single-bit BinarySharedTensor xB into an
+        ArithmeticSharedTensor. This is done by:
+
+    1. Generate ArithmeticSharedTensor [rA] and BinarySharedTensor =rB= with
+        a common 1-bit value r.
+    2. Hide xB with rB and open xB ^ rB
+    3. If xB ^ rB = 0, then return [rA], otherwise return 1 - [rA]
+        Note: This is an arithmetic xor of a single bit.
+    """
+    if comm.get().get_world_size() < 2:
+        from .arithmetic import ArithmeticSharedTensor
+
+        return ArithmeticSharedTensor(xB._tensor, precision=0, src=0)
+
+    provider = crypten.mpc.get_default_provider()
+    rA, rB = provider.B2A_rng(xB.size())
+
+    z = (xB ^ rB).reveal()
+    rA = rA * (1 - 2 * z) + z
+    return rA
