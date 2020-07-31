@@ -14,6 +14,7 @@ import torch
 import torch.distributed as dist
 from crypten.common import serial
 from torch.distributed import ReduceOp
+from crypten.cuda import CUDALongTensor
 
 from .communicator import Communicator, _logging
 
@@ -63,9 +64,9 @@ class DistributedCommunicator(Communicator):
             self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="nccl")
 
             if self.world_size == 3:
-                self.group01 = dist.new_group([0, 1], backend="gloo")
-                self.group12 = dist.new_group([1, 2], backend="gloo")
-                self.group20 = dist.new_group([2, 0], backend="gloo")
+                self.group01 = dist.new_group([0, 1], backend="nccl")
+                self.group12 = dist.new_group([1, 2], backend="nccl")
+                self.group20 = dist.new_group([2, 0], backend="nccl")
 
             self.ttp_initialized = init_ttp
             logging.info("World size = %d" % self.world_size)
@@ -233,7 +234,10 @@ class DistributedCommunicator(Communicator):
         result = []
         for _ in range(self.get_world_size()):
             result.append(torch.empty(size=tensor.size(), dtype=torch.long))
-        dist.all_gather(result, tensor, group=self.main_group)
+        dist.all_gather(result, tensor.data, group=self.main_group)
+        if tensor.is_cuda:
+            for i in range(len(result)):
+                result[i] = CUDALongTensor(tensor)
         return result
 
     @_logging
