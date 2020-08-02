@@ -26,6 +26,9 @@ def replicate_shares(x_share):
     req1.wait()
     req2.wait()
 
+    if x_share.is_cuda:
+        x_rep = CUDALongTensor(x_rep)
+
     return x_rep
 
 
