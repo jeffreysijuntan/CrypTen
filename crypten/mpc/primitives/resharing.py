@@ -121,7 +121,7 @@ def B2A_single_bit(xB):
         return ArithmeticSharedTensor(xB._tensor, precision=0, src=0)
 
     provider = crypten.mpc.get_default_provider()
-    rA, rB = provider.B2A_rng(xB.size())
+    rA, rB = provider.B2A_rng(xB.size(), device=xB.device)
 
     z = (xB ^ rB).reveal()
     rA = rA * (1 - 2 * z) + z
