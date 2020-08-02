@@ -7,6 +7,8 @@ from crypten.common import rng
 
 import torch.distributed as dist
 
+from crypten.cuda import CUDALongTensor
+
 
 def replicate_shares(x_share):
     rank = comm.get().get_rank()
