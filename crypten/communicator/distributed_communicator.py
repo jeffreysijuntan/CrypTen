@@ -236,7 +236,7 @@ class DistributedCommunicator(Communicator):
         result = []
         for _ in range(self.get_world_size()):
             result.append(torch.empty(size=tensor.size(), dtype=torch.long))
-        dist.all_gather(result, tensor.data, group=self.main_group)
+        dist.all_gather(result, tensor.data, group=self.main_group_nccl)
         if tensor.is_cuda:
             for i in range(len(result)):
                 result[i] = CUDALongTensor(tensor)

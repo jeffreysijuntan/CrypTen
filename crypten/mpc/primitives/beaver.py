@@ -106,7 +106,7 @@ def wraps(x):
     beta_xr._tensor = count_wraps([x._tensor, r._tensor])
 
     z = x + r
-    theta_z = comm.get().gather(z._tensor, 0)
+    theta_z = comm.get().all_gather(z._tensor, 0)
     theta_x = beta_xr - theta_r
 
     # TODO: Incorporate eta_xr
