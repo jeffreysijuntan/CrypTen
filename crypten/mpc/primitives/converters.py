@@ -18,10 +18,11 @@ from .binary import BinarySharedTensor
 
 def _A2B(arithmetic_tensor):
     rank = comm.get().get_rank()
+    device = arithmetic_tensor.device
 
     size = arithmetic_tensor.size()
 
-    z1, z2 = BinarySharedTensor.PRZS(size).share, BinarySharedTensor.PRZS(size).share
+    z1, z2 = BinarySharedTensor.PRZS(size, device=device).share, BinarySharedTensor.PRZS(size, device=device).share
 
     x1, x2 = arithmetic_tensor.share, resharing.replicate_shares(arithmetic_tensor.share)
 
@@ -43,10 +44,11 @@ def _A2B(arithmetic_tensor):
 
 def get_msb(arithmetic_tensor):
     rank = comm.get().get_rank()
+    device = arithmetic_tensor.device
 
     size = arithmetic_tensor.size()
 
-    z1, z2 = BinarySharedTensor.PRZS(size).share, BinarySharedTensor.PRZS(size).share
+    z1, z2 = BinarySharedTensor.PRZS(size, device=device).share, BinarySharedTensor.PRZS(size, device=device).share
 
     x1, x2 = arithmetic_tensor.share, resharing.replicate_shares(arithmetic_tensor.share)
 
