@@ -64,9 +64,9 @@ class DistributedCommunicator(Communicator):
             self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="nccl")
 
             if self.world_size == 3:
-                self.group01 = dist.new_group([0, 1], backend="nccl")
-                self.group12 = dist.new_group([1, 2], backend="nccl")
-                self.group20 = dist.new_group([2, 0], backend="nccl")
+                self.group01 = dist.new_group([0, 1], backend="gloo")
+                self.group12 = dist.new_group([1, 2], backend="gloo")
+                self.group20 = dist.new_group([2, 0], backend="gloo")
 
             self.ttp_initialized = init_ttp
             logging.info("World size = %d" % self.world_size)
@@ -223,6 +223,9 @@ class DistributedCommunicator(Communicator):
             for _ in range(self.get_world_size()):
                 result.append(torch.empty(size=tensor.size(), dtype=torch.long))
             dist.gather(tensor.data, result, dst, group=self.main_group)
+            if tensor.is_cuda:
+                for i in range(len(result)):
+                    result[i] = CUDALongTensor(tensor)
             return result
         dist.gather(tensor.data, [], dst, group=self.main_group)
         return [None]
