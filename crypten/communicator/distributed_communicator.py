@@ -235,7 +235,7 @@ class DistributedCommunicator(Communicator):
         assert dist.is_initialized(), "initialize the communicator first"
         result = []
         for _ in range(self.get_world_size()):
-            result.append(torch.empty(size=tensor.size(), dtype=torch.long))
+            result.append(torch.empty(size=tensor.size(), dtype=torch.long), device=tensor.device)
         dist.all_gather(result, tensor.data, group=self.main_group_nccl)
         if tensor.is_cuda:
             for i in range(len(result)):
