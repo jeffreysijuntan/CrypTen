@@ -239,7 +239,8 @@ class TTPServer:
                 kwargs = message["kwargs"]
                 result = getattr(self, function)(*args, **kwargs)
 
-                comm.get().send_obj(result.size(), 1, self.ttp_group)
+                if function == "additive":
+                    comm.get().send_obj(result.size(), 1, self.ttp_group)
                 comm.get().send_obj(result.size(), 0, self.ttp_group)
                 comm.get().broadcast(result, 2, self.comm_group)
         except RuntimeError:
