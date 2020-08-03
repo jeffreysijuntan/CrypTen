@@ -1218,10 +1218,13 @@ class Mul(Module):
     def forward(self, x):
         if hasattr(self, "weight"):
             output = x.mul(self.weight)
+        else:
+            return 0
         return output
 
     @staticmethod
     def from_onnx(parameters=None, attributes=None):
+        print(parameters)
         if parameters is None:
             parameters = {}
         # set parameters if they exist
