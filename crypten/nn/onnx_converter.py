@@ -159,7 +159,7 @@ class FromOnnx:
             attributes = FromOnnx.get_attributes(node)
             parameters, node_input_names = self.get_parameters(node, input_names)
 
-            print(node)
+            #print(node)
 
             crypten_class = self._get_operator_class(node.op_type, attributes)
 

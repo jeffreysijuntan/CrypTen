@@ -1209,32 +1209,13 @@ class Linear(Module):
         return module
 
 
-# class Mul(Module):
-#     def __init__(self, weight=None):
-#         super().__init__()
-#         if weight is not None:
-#             self.register_parameter("weight", weight)
+class Mul(Module):
+    def forward(self, x, y):
+        return x * y
 
-#     def forward(self, x):
-#         if hasattr(self, "weight"):
-#             output = x.mul(self.weight)
-#         else:
-#             return 0
-#         return output
-
-#     @staticmethod
-#     def from_onnx(parameters=None, attributes=None):
-#         if parameters is None:
-#             parameters = {}
-#         # set parameters if they exist
-#         if parameters:
-#             assert len(parameters) == 1, "Can have maximum one parameter"
-#             weight_param = list(parameters.keys())[0]
-#             value = parameters[weight_param]
-#             module = Mul(weight=value)
-#         else:
-#             module = Mul()
-#         return module
+    @staticmethod
+    def from_onnx(parameters=None, attributes=None):
+        return Mul()
 
 
 class MatMul(Module):
