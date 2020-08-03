@@ -1587,7 +1587,7 @@ class Conv2d(Module):
         assert _all_the_same(
             attributes["pads"]
         ), "padding must be the same in each dimension"
-        assert attributes["group"] == 1, "group convolution not supported"
+        #assert attributes["group"] == 1, "group convolution not supported"
         assert all(
             dilation == 1 for dilation in attributes["dilations"]
         ), "dilated convolutions not supported"
