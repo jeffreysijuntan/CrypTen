@@ -1210,8 +1210,9 @@ class Linear(Module):
 
 
 class Mul(Module):
-    def forward(self, x, y):
-        return x * y
+    def forward(self, x):
+        print(x)
+        return x[0] * x[1]
 
     @staticmethod
     def from_onnx(parameters=None, attributes=None):
