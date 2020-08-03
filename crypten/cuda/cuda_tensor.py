@@ -179,8 +179,13 @@ class CUDALongTensor(object):
 
         c_z = c_out if op in ["conv1d", "conv2d"] else c_in
 
+        if "groups" in kwargs:
+            kwargs["groups"] *= 16
+        else:
+            kwargs["groups"] = 16
+
         z_encoded = getattr(torch, op)(
-            x_enc_span, y_enc_span, *args, **kwargs, groups=16
+            x_enc_span, y_enc_span, *args, **kwargs
         )
         z_encoded = z_encoded.reshape(bs, 16, c_z, *z_encoded.size()[2:]).transpose_(
             0, 1
