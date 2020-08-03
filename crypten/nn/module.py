@@ -1211,7 +1211,7 @@ class Linear(Module):
 
 class Mul(Module):
     def forward(self, x):
-        print(x)
+        print(len(x))
         return x[0] * x[1]
 
     @staticmethod
