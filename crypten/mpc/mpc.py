@@ -17,7 +17,7 @@ from crypten.cuda import CUDALongTensor
 
 from ..cryptensor import CrypTensor
 from .max_helper import _argmax_helper, _max_helper_all_tree_reductions
-from .primitives.converters import convert, get_msb
+from .primitives.converters import convert
 from .ptype import ptype as Ptype
 
 
@@ -541,8 +541,7 @@ class MPCTensor(CrypTensor):
     @mode(Ptype.arithmetic)
     def relu(self):
         """Compute a Rectified Linear function on the input tensor."""
-        #return self * self.ge(0, _scale=False)
-        return self * get_msb(self)
+        return self * self.ge(0, _scale=False)
 
     @mode(Ptype.arithmetic)
     def weighted_index(self, dim=None):
