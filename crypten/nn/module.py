@@ -1514,7 +1514,7 @@ class Conv2d(Module):
     """
 
     def __init__(
-        self, in_channels, out_channels, kernel_size, stride=1, padding=0, group=1, bias=True
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0, groups=1, bias=True
     ):
         # check inputs:
         super().__init__()
@@ -1536,6 +1536,7 @@ class Conv2d(Module):
             stride=stride,
             padding=padding,
             bias=bias,
+            groups=groups,
         )
         self.register_parameter("weight", pytorch_module.weight)
         if bias:
@@ -1544,10 +1545,10 @@ class Conv2d(Module):
         # set other instance fields:
         self.stride = stride
         self.padding = padding
-        self.group = group
+        self.groups = groups
 
     def forward(self, x):
-        x = x.conv2d(self.weight, stride=self.stride, padding=self.padding, group=self.group)
+        x = x.conv2d(self.weight, stride=self.stride, padding=self.padding, groups=self.groups)
         if hasattr(self, "bias"):
             x = x.add(self.bias.unsqueeze(-1).unsqueeze(-1))
         return x
@@ -1587,7 +1588,7 @@ class Conv2d(Module):
             stride=attributes["strides"][0],
             padding=attributes["pads"][0],
             bias=("bias" in parameters),
-            group= attributes["group"],
+            groups= attributes["group"],
         )
 
         # set parameters:
