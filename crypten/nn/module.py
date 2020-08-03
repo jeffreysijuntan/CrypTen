@@ -1578,11 +1578,12 @@ class Conv2d(Module):
             dilation == 1 for dilation in attributes["dilations"]
         ), "dilated convolutions not supported"
 
-        print(attributes["group"])
-
         # initialize module:
         in_channels = parameters["weight"].size(1)
         out_channels = parameters["weight"].size(0)
+
+        print(in_channels, attributes["group"], out_channels)
+
         module = Conv2d(
             in_channels,
             out_channels,
