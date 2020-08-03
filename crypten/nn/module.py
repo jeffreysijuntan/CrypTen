@@ -1224,7 +1224,7 @@ class Mul(Module):
 
     @staticmethod
     def from_onnx(parameters=None, attributes=None):
-        print(parameters)
+        print(attributes)
         if parameters is None:
             parameters = {}
         # set parameters if they exist
