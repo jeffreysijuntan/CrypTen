@@ -38,7 +38,8 @@ class TrustedThirdParty:
             )
         else:
             # TODO: Compute size without executing computation
-            c_size = getattr(torch, op)(a, b, *args, **kwargs).size()
+            #c_size = getattr(torch, op)(a, b, *args, **kwargs).size()
+            c_size = comm.get().recv_obj(comm.get().get_ttp_rank(), comm.get().ttp_group)
             c = generate_random_ring_element(c_size, generator=generator, device=device)
 
         a = ArithmeticSharedTensor.from_shares(a, precision=0)
@@ -238,6 +239,7 @@ class TTPServer:
                 kwargs = message["kwargs"]
                 result = getattr(self, function)(*args, **kwargs)
 
+                comm.get().send_obj(result.size(), 1, self.ttp_group)
                 comm.get().send_obj(result.size(), 0, self.ttp_group)
                 comm.get().broadcast(result, 2, self.comm_group)
         except RuntimeError:
