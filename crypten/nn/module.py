@@ -1582,6 +1582,7 @@ class Conv2d(Module):
         in_channels = parameters["weight"].size(1)
         out_channels = parameters["weight"].size(0)
 
+        print(attributes)
         print(in_channels, attributes["group"], out_channels)
 
         module = Conv2d(
