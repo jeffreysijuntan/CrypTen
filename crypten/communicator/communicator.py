@@ -211,6 +211,7 @@ def _logging(func):
                 nbytes = sum(x.nelement() for x in args[0])
                 self._log_communication(nbytes)
             else:  # one tensor communicated
+                print(args[0])
                 self._log_communication(args[0].nelement())
 
             tic = timeit.timeit()
