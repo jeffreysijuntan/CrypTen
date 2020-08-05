@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
@@ -106,11 +106,9 @@ class Module:
         """
         Sets value of parameter in the module from shares. This functionality is
         only for MPC-encrypted models.
-
         Supported named arguments for `MPCTensor` parameters include the `precision`
         of the encoder (default = `None`), the rank of the `src` (default = 0),
         and the `ptype` of the shares (default = `crypten.mpc.arithmetic`).
-
         This function cannot set the parameters in child modules.
         """
 
@@ -265,7 +263,6 @@ class Module:
 
     def update_parameters(self, learning_rate, grad_threshold=100):
         """Performs gradient step on parameters.
-
         Parameters:
             grad_threshold - Because arithmetic operations can extremely rarely
                     return large incorrect results, we zero-out all elements
@@ -334,14 +331,11 @@ class Module:
     def to(self, *args, **kwargs):
         """
         Moves and/or casts the parameters and buffers.
-
         This can be called as
-
         `to(device=None, dtype=None, non_blocking=False)`
         `to(dtype, non_blocking=False)`
         `to(tensor, non_blocking=False)`
         `to(memory_format=torch.channels_last)`
-
         Args:
             device (torch.device) – the desired device of the parameters
             and buffers in this module
@@ -351,7 +345,6 @@ class Module:
             desired dtype and device for all parameters and buffers in this module
             memory_format (torch.memory_format) – the desired memory format
             for 4D parameters and buffers in this module (keyword only argument)
-
         """
         for name, param in self._parameters.items():
             self.set_parameter(name, param.to(*args, **kwargs))
@@ -365,7 +358,6 @@ class Module:
     def cuda(self, device=None):
         """
         Moves all model parameters and buffers to the GPU.
-
         Args:
             device (int, optional) – if specified, all parameters will be copied
             to that device
@@ -507,6 +499,11 @@ class Module:
                 )
             modules[name] = value
         else:
+            for key in ["_parameters", "_modules", "_buffers"]:
+                if key in self.__dict__ and name in self.__dict__[key]:
+                    values = self.__dict__[key]
+                    values[name] = value
+                    return
             object.__setattr__(self, name, value)
 
 
@@ -521,7 +518,6 @@ class Container(Module):
 class Graph(Container):
     """
     Acyclic graph of modules.
-
     The module maintains a dict of named modules and a graph structure stored in
     a dict where each key is a module name, and the associated value is a list
     of module names that provide the input into the module.
@@ -757,7 +753,6 @@ class Transpose(Module):
     tensor of shape (1, 2, 3), the output shape will be (2, 1, 3). Note
     that the signature of this module matches the ONNX specification
     and differs from `torch.transpose`
-
     Args:
         `perm`: list of ints
     """
@@ -785,19 +780,15 @@ class Transpose(Module):
 class Squeeze(Module):
     r"""
     Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
-
     For example, if `input` is of shape:
     :math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` tensor
     will be of shape: :math:`(A \times B \times C \times D)`.
-
     When :attr:`dimension` is given, a squeeze operation is done only in the given
     dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
     ``squeeze(input, 0)`` leaves the tensor unchanged, but ``squeeze(input, 1)``
     will squeeze the tensor to the shape :math:`(A \times B)`.
-
     .. note:: The returned tensor shares the storage with the input tensor,
             so changing the contents of one will change the contents of the other.
-
     Args:
         dimension (int, optional): if given, the input will be squeezed only in
             this dimension
@@ -827,12 +818,10 @@ class Unsqueeze(Module):
     Module that unsqueezes a tensor.
     Returns a new tensor with a dimension of size one inserted at the
     specified position.
-
     The returned tensor shares the same underlying data with this tensor.
     A :attr:`dimension` value within the range ``[-input.dim() - 1, input.dim() + 1)``
     can be used. Negative :attr:`dimension` will correspond to :meth:`unsqueeze`
     applied at :attr:`dimension` = ``dim + input.dim() + 1``.
-
     Args:
         dimension (int): the index at which to insert the singleton dimension
     """
@@ -859,7 +848,6 @@ class Unsqueeze(Module):
 class Flatten(Module):
     """
     Module that flattens the input tensor into a 2D matrix.
-
     Args:
         axis (int, optional): must not be larger than dimension
     """
@@ -913,7 +901,6 @@ class Shape(Module):
 class Concat(Module):
     """
     Module that concatenates tensors along a dimension.
-
     Args:
         dim (int, optional): the dimension over which to concatenate
     """
@@ -940,16 +927,13 @@ class Reshape(Module):
     Module that reshapes tensors to new dimensions.
     Returns a tensor with same data and number of elements as :attr:`self`,
     but with the specified shape.
-
     When possible, the returned tensor will be a view
     of :attr:`self`. Otherwise, it will be a copy. Contiguous inputs and inputs
     with compatible strides can be reshaped without copying, but you should not
     depend on the copying vs. viewing behavior.
-
     See :meth:`torch.Tensor.view` on when it is possible to return a view.
     A single dimension may be -1, in which case it's inferred from the remaining
     dimensions and the number of elements in :attr:`self`.
-
     Args:
         input (tuple): contains input tensor and shape (torch.Size)
     """
@@ -972,10 +956,8 @@ class Dropout(Module):
     distribution. Furthermore, the outputs are scaled by a factor of
     :math:`\frac{1}{1-p}` during training. This means that during evaluation
     the module simply computes an identity function.
-
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-
     Shape:
         - Input: :math:`(*)`. Input can be of any shape
         - Output: :math:`(*)`. Output is of the same shape as input
@@ -1004,7 +986,6 @@ class DropoutNd(Module):
     batched input is a nD tensor :math:`\text{input}[i, j]`).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
-
     Args:
         p (float, optional): probability of an element to be zero-ed.
     """
@@ -1033,9 +1014,7 @@ class Dropout2d(DropoutNd):
     batched input is a 2D tensor :math:`\text{input}[i, j]`).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
-
     Usually the input comes from :class:`nn.Conv2d` modules.
-
     Args:
         p (float, optional): probability of an element to be zero-ed.
     Shape:
@@ -1056,12 +1035,9 @@ class Dropout3d(DropoutNd):
     batched input is a 3D tensor :math:`\text{input}[i, j]`).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
-
     Usually the input comes from :class:`nn.Conv3d` modules.
-
     Args:
         p (float, optional): probability of an element to be zeroed.
-
     Shape:
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
@@ -1084,7 +1060,6 @@ class Gather(Module):
     indices[i_{0}, ..., i_{q-1}]`. Then :math:`output[i_{0}, ..., i_{q-1}, j_{0},
     ..., j_{r-2}] = input[k, j_{0}, ..., j_{r-2}]`. This is an operation from the
     ONNX specification.
-
     Args:
         dimension (int): the axis along which to index
         index(tensor): the indices to select along the `dimension`
@@ -1164,13 +1139,11 @@ class Linear(Module):
     """
     Module that performs linear transformation.
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
-
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
-
     Shape:
         - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
           additional dimensions and :math:`H_{in} = \text{in\_features}`
@@ -1209,15 +1182,6 @@ class Linear(Module):
         return module
 
 
-class Mul(Module):
-    def forward(self, x):
-        return x[0] * x[1]
-
-    @staticmethod
-    def from_onnx(parameters=None, attributes=None):
-        return Mul()
-
-
 class MatMul(Module):
     """
     Matrix product of two tensors.
@@ -1240,7 +1204,6 @@ class MatMul(Module):
         :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is
         a :math:`(k \times m \times p)` tensor, :attr:`out` will be an
         :math:`(j \times k \times n \times p)` tensor.
-
     Arguments:
         Option 1: [input1, input2]
             input1: first input matrix to be multiplied
@@ -1282,38 +1245,28 @@ class MatMul(Module):
 class Conv1d(Module):
     r"""
     Module that performs 1D convolution.
-
     Applies a 1D convolution over an input signal composed of several input
     planes.
-
     In the simplest case, the output value of the layer with input size
     :math:`(N, C_{\text{in}}, L)` and output :math:`(N, C_{\text{out}}, L_{\text{out}})`
     can be precisely described as:
-
     .. math::
         \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
         \sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k)
         \star \text{input}(N_i, k)
-
-
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     and :math:`L` is a length of signal sequence.
-
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
-
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
-
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
-
     * :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
-
         * At groups=1, all inputs are convolved to all outputs.
         * At groups=2, the operation becomes equivalent to having two conv
           layers side by side, each seeing half the input channels,
@@ -1322,15 +1275,12 @@ class Conv1d(Module):
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`,
     :attr:`dilation` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -1344,19 +1294,15 @@ class Conv1d(Module):
         Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output.
         Default: ``True``
-
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
         - Output: :math:`(N, C_{out}, L_{out})` where
-
           .. math::
               L_{out} = \left\lfloor\frac{L_{in}  +
               2 \times \text{padding} - \text{dilation} \times
               (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
-
     .. _cross-correlation:
         https://en.wikipedia.org/wiki/Cross-correlation
-
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """  # noqa: W605
@@ -1427,39 +1373,29 @@ class Conv1d(Module):
 class Conv2d(Module):
     r"""
     Module that performs 2D convolution.
-
     Applies a 2D convolution over an input signal composed of several input
     planes.
-
     In the simplest case, the output value of the layer with input size
     :math:`(N, C_{\text{in}}, H, W)` and output :math:`(N, C_{\text{out}},
     H_{\text{out}}, W_{\text{out}})` can be precisely described as:
-
     .. math::
         \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
         \sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k)
         \star \text{input}(N_i, k)
-
-
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
-
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
-
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
-
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
-
     * :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
-
         * At groups=1, all inputs are convolved to all outputs.
         * At groups=2, the operation becomes equivalent to having two conv
           layers side by side, each seeing half the input channels,
@@ -1468,15 +1404,12 @@ class Conv2d(Module):
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`,
     :attr:`dilation` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -1490,24 +1423,19 @@ class Conv2d(Module):
         Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output.
         Default: ``True``
-
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
-
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  +
               2 \times \text{padding}[0] - \text{dilation}[0] \times
               (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
-
           .. math::
               W_{out} = \left\lfloor\frac{W_{in}  +
               2 \times \text{padding}[1] - \text{dilation}[1] \times
               (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
-
     .. _cross-correlation:
         https://en.wikipedia.org/wiki/Cross-correlation
-
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
@@ -1578,7 +1506,6 @@ class Conv2d(Module):
         # initialize module:
         in_channels = parameters["weight"].size(1)
         out_channels = parameters["weight"].size(0)
-
         module = Conv2d(
             in_channels,
             out_channels,
@@ -1597,7 +1524,6 @@ class Conv2d(Module):
 class ReLU(Module):
     r"""
     Module that computes rectified linear unit (ReLU) activations element-wise.
-
     :math:`\text{ReLU}(x)= \max(0, x)`
     """
 
@@ -1611,7 +1537,6 @@ class ReLU(Module):
 
 class Sigmoid(Module):
     r"""Applies the element-wise function:
-
     .. math::
         \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
     """
@@ -1628,21 +1553,16 @@ class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range [0,1] and sum to 1.
-
     Softmax is defined as:
-
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
-
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(*)`, same shape as the input
-
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
-
     Arguments:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
@@ -1665,19 +1585,15 @@ class Softmax(Module):
 class LogSoftmax(Module):
     r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
     input Tensor. The LogSoftmax formulation can be simplified as:
-
     .. math::
         \text{LogSoftmax}(x_{i}) =
         \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
-
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(*)`, same shape as the input
-
     Arguments:
         dim (int): A dimension along which LogSoftmax will be computed.
-
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range \[-inf, 0\)
@@ -1702,26 +1618,21 @@ class _Pool2d(Module):
     Module that performs 2D pooling.
     Applies a 2D max or average pooling over an input signal composed of several input
     planes.
-
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on
     both sides for :attr:`padding` number of points. :attr:`dilation` controls
     the spacing between the kernel points. It is harder to describe, but this
     `link`_ has a nice visualization of what :attr:`dilation` does.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`,
     :attr:`dilation` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         pool_type (str): specifies "average" or "max" pooling
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
-
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
@@ -1774,40 +1685,30 @@ class AvgPool2d(_Pool2d):
     r"""
     Module that Applies a 2D average pooling
     over an input signal composed of several input planes.
-
     In the simplest case, the output value of the layer with input size
     :math:`(N, C, H, W)`, output :math:`(N, C, H_{out}, W_{out})` and
     :attr:`kernel_size` :math:`(kH, kW)` can be precisely described as:
-
     .. math::
-
         out(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1}
         \sum_{n=0}^{kW-1} input(N_i, C_j, stride[0] \times h + m, stride[1]
         \times w + n)
-
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on
     both sides for :attr:`padding` number of points.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
-
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})`, where
-
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
                 \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
-
           .. math::
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
