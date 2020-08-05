@@ -202,7 +202,7 @@ def _logging(func):
                 return args[0]
 
         # only log if needed:
-        if self.is_verbose():
+        if self.is_verbose() and comm.get().get_rank() != 2:
             if func.__name__ == "barrier":
                 self._log_communication(0, 1)
             elif func.__name__ == "scatter":  # N - 1 tensors communicated
@@ -211,7 +211,6 @@ def _logging(func):
                 nbytes = sum(x.nelement() for x in args[0])
                 self._log_communication(nbytes)
             else:  # one tensor communicated
-                print(args[0])
                 self._log_communication(args[0].nelement())
 
             tic = timeit.timeit()
