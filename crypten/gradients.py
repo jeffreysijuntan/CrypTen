@@ -447,7 +447,7 @@ class AutogradDropout(AutogradFunction):
 
         # training mode:
         cryptensor_type = crypten.get_cryptensor_type(input)
-        rand_tensor = crypten.rand(input.size(), cryptensor_type=cryptensor_type)
+        rand_tensor = crypten.rand(input.size(), cryptensor_type=cryptensor_type, device=input.device)
         boolean_mask = rand_tensor > p
         if inplace:
             result = input.mul_(boolean_mask).div_(1 - p)
