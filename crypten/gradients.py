@@ -1492,8 +1492,8 @@ class AutogradBatchNorm(AutogradFunction):
             mean = x.mean(stats_dimensions)
             variance = x.var(stats_dimensions)
             if running_mean is not None and running_var is not None:
-                running_var = (running_var * (1.0 - momentum) + variance * momentum)
-                running_mean =(running_mean * (1.0 - momentum) + mean * momentum)
+                running_var.set(running_var * (1.0 - momentum) + variance * momentum)
+                running_mean.set(running_mean * (1.0 - momentum) + mean * momentum)
         else:
             if running_mean is None or running_var is None:
                 raise ValueError(
