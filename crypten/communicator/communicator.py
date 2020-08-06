@@ -202,7 +202,7 @@ def _logging(func):
                 return args[0]
 
         # only log if needed:
-        if self.is_verbose() and self.get_rank() != 2:
+        if self.is_verbose():
             if func.__name__ == "barrier":
                 self._log_communication(0, 1)
             elif func.__name__ == "scatter":  # N - 1 tensors communicated
