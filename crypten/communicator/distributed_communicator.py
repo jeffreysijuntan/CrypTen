@@ -61,7 +61,7 @@ class DistributedCommunicator(Communicator):
             if total_ws > 1:
                 self.ttp_comm_group = dist.new_group([0, total_ws - 1], backend="gloo")
             self.main_group = dist.new_group(list(range(self.world_size)))
-            self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="nccl")
+            self.main_group_nccl = dist.new_group(list(range(self.world_size)), backend="gloo")
 
             # if self.world_size == 3:
             #     self.group01 = dist.new_group([0, 1], backend="gloo")
