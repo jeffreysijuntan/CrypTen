@@ -161,7 +161,7 @@ class TTPClient:
             # Initialize connection
             self.ttp_group = comm.get().ttp_group
             self.comm_group = comm.get().ttp_comm_group
-            self.device = "cuda"
+            self.device = "cpu"
             self._setup_generators()
             logging.info(f"TTPClient {comm.get().get_rank()} initialized")
 
@@ -220,7 +220,7 @@ class TTPServer:
         crypten.init()
         self.ttp_group = comm.get().ttp_group
         self.comm_group = comm.get().ttp_comm_group
-        self.device = "cuda"
+        self.device = "cpu"
         self._setup_generators()
 
         logging.info("TTPServer Initialized")
