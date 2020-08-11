@@ -27,35 +27,35 @@ class TrustedThirdParty:
     @staticmethod
     def generate_additive_triple(size0, size1, op, device=None, *args, **kwargs):
         """Generate multiplicative triples of given sizes"""
-        generator = TTPClient.get().generator
+        generator = TTPClient.get().get_generator(device=device)
 
         a = generate_random_ring_element(size0, generator=generator, device=device)
         b = generate_random_ring_element(size1, generator=generator, device=device)
         if comm.get().get_rank() == 0:
             # Request c from TTP
             c = TTPClient.get().ttp_request(
-                "additive", size0, size1, op, *args, **kwargs
+                "additive", device, size0, size1, op, *args, **kwargs
             )
         else:
             # TODO: Compute size without executing computation
-            #c_size = getattr(torch, op)(a, b, *args, **kwargs).size()
-            c_size = comm.get().recv_obj(comm.get().get_ttp_rank(), comm.get().ttp_group)
+            c_size = getattr(torch, op)(a, b, *args, **kwargs).size()
             c = generate_random_ring_element(c_size, generator=generator, device=device)
 
         a = ArithmeticSharedTensor.from_shares(a, precision=0)
         b = ArithmeticSharedTensor.from_shares(b, precision=0)
         c = ArithmeticSharedTensor.from_shares(c, precision=0)
+
         return a, b, c
 
     @staticmethod
     def square(size, device=None):
         """Generate square double of given size"""
-        generator = TTPClient.get().generator
+        generator = TTPClient.get().get_generator(device=device)
 
         r = generate_random_ring_element(size, generator=generator, device=device)
         if comm.get().get_rank() == 0:
             # Request r2 from TTP
-            r2 = TTPClient.get().ttp_request("square", size)
+            r2 = TTPClient.get().ttp_request("square", device, size)
         else:
             r2 = generate_random_ring_element(size, generator=generator, device=device)
 
@@ -66,14 +66,14 @@ class TrustedThirdParty:
     @staticmethod
     def generate_binary_triple(size0, size1, device=None):
         """Generate binary triples of given size"""
-        generator = TTPClient.get().generator
+        generator = TTPClient.get().get_generator(device=device)
 
         a = generate_kbit_random_tensor(size0, generator=generator, device=device)
         b = generate_kbit_random_tensor(size1, generator=generator, device=device)
 
         if comm.get().get_rank() == 0:
             # Request c from TTP
-            c = TTPClient.get().ttp_request("binary", size0, size1)
+            c = TTPClient.get().ttp_request("binary", device, size0, size1)
         else:
             size2 = torch.broadcast_tensors(a, b)[0].size()
             c = generate_kbit_random_tensor(size2, generator=generator, device=device)
@@ -87,12 +87,12 @@ class TrustedThirdParty:
     @staticmethod
     def wrap_rng(size, device=None):
         """Generate random shared tensor of given size and sharing of its wraps"""
-        generator = TTPClient.get().generator
+        generator = TTPClient.get().get_generator(device=device)
 
         r = generate_random_ring_element(size, generator=generator, device=device)
         if comm.get().get_rank() == 0:
             # Request theta_r from TTP
-            theta_r = TTPClient.get().ttp_request("wraps", size)
+            theta_r = TTPClient.get().ttp_request("wraps", device, size)
         else:
             theta_r = generate_random_ring_element(
                 size, generator=generator, device=device
@@ -105,7 +105,7 @@ class TrustedThirdParty:
     @staticmethod
     def B2A_rng(size, device=None):
         """Generate random bit tensor as arithmetic and binary shared tensors"""
-        generator = TTPClient.get().generator
+        generator = TTPClient.get().get_generator(device=device)
 
         # generate random bit
         rB = generate_kbit_random_tensor(
@@ -114,7 +114,7 @@ class TrustedThirdParty:
 
         if comm.get().get_rank() == 0:
             # Request rA from TTP
-            rA = TTPClient.get().ttp_request("B2A", size)
+            rA = TTPClient.get().ttp_request("B2A", device, size)
         else:
             rA = generate_random_ring_element(size, generator=generator, device=device)
 
@@ -125,7 +125,7 @@ class TrustedThirdParty:
     @staticmethod
     def rand(*sizes, encoder=None, device=None):
         """Generate random ArithmeticSharedTensor uniform on [0, 1]"""
-        generator = TTPClient.get().generator
+        generator = TTPClient.get().get_generator(device=device)
 
         if isinstance(sizes, torch.Size):
             sizes = tuple(sizes)
@@ -135,7 +135,9 @@ class TrustedThirdParty:
 
         if comm.get().get_rank() == 0:
             # Request samples from TTP
-            samples = TTPClient.get().ttp_request("rand", *sizes, encoder=encoder)
+            samples = TTPClient.get().ttp_request(
+                "rand", device, *sizes, encoder=encoder
+            )
         else:
             samples = generate_random_ring_element(
                 sizes, generator=generator, device=device
@@ -157,11 +159,10 @@ class TTPClient:
     class __TTPClient:
         """Singleton class"""
 
-        def __init__(self, device=None):
+        def __init__(self):
             # Initialize connection
             self.ttp_group = comm.get().ttp_group
             self.comm_group = comm.get().ttp_comm_group
-            self.device = "cpu"
             self._setup_generators()
             logging.info(f"TTPClient {comm.get().get_rank()} initialized")
 
@@ -172,20 +173,39 @@ class TTPClient:
             ).wait()
             dist.barrier(group=self.ttp_group)
 
-            self.generator = torch.Generator(device=self.device)
-            self.generator.manual_seed(seed.item())
+            self.generator = torch.Generator(device="cpu")
+            self.generator_cuda = torch.Generator(device="cuda")
 
-        def ttp_request(self, func_name, *args, **kwargs):
+            self.generator.manual_seed(seed.item())
+            self.generator_cuda.manual_seed(seed.item())
+
+        def get_generator(self, device=None):
+            if device is None:
+                device = "cpu"
+            device = torch.device(device)
+            if device.type == "cuda":
+                return self.generator_cuda
+            else:
+                return self.generator
+
+        def ttp_request(self, func_name, device, *args, **kwargs):
             assert (
                 comm.get().get_rank() == 0
             ), "Only party 0 communicates with the TTPServer"
-            message = {"function": func_name, "args": args, "kwargs": kwargs}
+            if device is not None:
+                device = str(device)
+            message = {
+                "function": func_name,
+                "device": device,
+                "args": args,
+                "kwargs": kwargs,
+            }
             ttp_rank = comm.get().get_ttp_rank()
 
             comm.get().send_obj(message, ttp_rank, self.ttp_group)
 
             size = comm.get().recv_obj(ttp_rank, self.ttp_group)
-            result = torch.empty(size, dtype=torch.long, device=self.device)
+            result = torch.empty(size, dtype=torch.long, device=device)
             comm.get().broadcast(result, ttp_rank, self.comm_group)
 
             return result
@@ -214,7 +234,7 @@ class TTPClient:
 class TTPServer:
     TERMINATE = -1
 
-    def __init__(self, device=None):
+    def __init__(self):
         """Initializes a Trusted Third Party server that receives requests"""
         # Initialize connection
         crypten.init()
@@ -235,17 +255,18 @@ class TTPServer:
                     return
 
                 function = message["function"]
+                device = message["device"]
                 args = message["args"]
                 kwargs = message["kwargs"]
+
+                self.device = device
+
                 result = getattr(self, function)(*args, **kwargs)
 
-                if function == "additive":
-                    comm.get().send_obj(result.size(), 1, self.ttp_group)
                 comm.get().send_obj(result.size(), 0, self.ttp_group)
                 comm.get().broadcast(result, 2, self.comm_group)
         except RuntimeError:
-            print("runtime error")
-            logging.info("Encounter RuntimeError. TTPServer shutting down.")
+            logging.info("Encountered Runtime error. TTPServer shutting down.")
 
     def _setup_generators(self):
         """Create random generator to send to a party"""
@@ -255,20 +276,33 @@ class TTPServer:
         reqs = [
             dist.isend(tensor=seeds[i], dst=i, group=self.ttp_group) for i in range(ws)
         ]
-        self.generators = [torch.Generator(device=self.device) for _ in range(ws)]
+        self.generators = [torch.Generator(device="cpu") for _ in range(ws)]
+        self.generators_cuda = [torch.Generator(device="cuda") for _ in range(ws)]
 
         for i in range(ws):
             self.generators[i].manual_seed(seeds[i].item())
+            self.generators_cuda[i].manual_seed(seeds[i].item())
             reqs[i].wait()
 
         dist.barrier(group=self.ttp_group)
+
+    def _get_generators(self, device=None):
+        if device is None:
+            device = "cpu"
+        device = torch.device(device)
+        if device.type == "cuda":
+            return self.generators_cuda
+        else:
+            return self.generators
 
     def _get_additive_PRSS(self, size, remove_rank=False):
         """
         Generates a plaintext value from a set of random additive secret shares
         generated by each party
         """
-        gens = self.generators[1:] if remove_rank else self.generators
+        gens = self._get_generators(device=self.device)
+        if remove_rank:
+            gens = gens[1:]
         result = torch_stack(
             [
                 generate_random_ring_element(size, generator=g, device=g.device)
@@ -282,7 +316,9 @@ class TTPServer:
         Generates a plaintext value from a set of random binary secret shares
         generated by each party
         """
-        gens = self.generators[1:] if remove_rank else self.generators
+        gens = self._get_generators(device=self.device)
+        if remove_rank:
+            gens = gens[1:]
         result = [
             generate_kbit_random_tensor(
                 size, bitlength=bitlength, generator=g, device=g.device
