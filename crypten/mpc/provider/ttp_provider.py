@@ -161,7 +161,7 @@ class TTPClient:
             # Initialize connection
             self.ttp_group = comm.get().ttp_group
             self.comm_group = comm.get().ttp_comm_group
-            self.device = "cpu"
+            self.device = "cuda"
             self._setup_generators()
             logging.info(f"TTPClient {comm.get().get_rank()} initialized")
 
@@ -220,7 +220,7 @@ class TTPServer:
         crypten.init()
         self.ttp_group = comm.get().ttp_group
         self.comm_group = comm.get().ttp_comm_group
-        self.device = "cpu"
+        self.device = "cuda"
         self._setup_generators()
 
         logging.info("TTPServer Initialized")
@@ -244,7 +244,6 @@ class TTPServer:
                 comm.get().send_obj(result.size(), 0, self.ttp_group)
                 comm.get().broadcast(result, 2, self.comm_group)
         except RuntimeError:
-            print(RuntimeError)
             logging.info("Encounter RuntimeError. TTPServer shutting down.")
 
     def _setup_generators(self):
