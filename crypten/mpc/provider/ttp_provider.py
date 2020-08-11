@@ -244,6 +244,7 @@ class TTPServer:
                 comm.get().send_obj(result.size(), 0, self.ttp_group)
                 comm.get().broadcast(result, 2, self.comm_group)
         except RuntimeError:
+            print("runtime error")
             logging.info("Encounter RuntimeError. TTPServer shutting down.")
 
     def _setup_generators(self):
