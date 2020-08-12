@@ -449,12 +449,12 @@ class Module:
                 for idx, arg in enumerate(args):
                     if torch.is_tensor(arg):
                         args[idx] = crypten.cryptensor(arg)
-            else:
-                if any(isinstance(arg, crypten.CrypTensor) for arg in args):
-                    raise RuntimeError(
-                        "Cannot input CrypTensors into unencrypted model."
-                        "Encrypt the model before feeding it CrypTensors."
-                    )
+            # else:
+            #     if any(isinstance(arg, crypten.CrypTensor) for arg in args):
+            #         raise RuntimeError(
+            #             "Cannot input CrypTensors into unencrypted model."
+            #             "Encrypt the model before feeding it CrypTensors."
+            #         )
             return object.__getattribute__(self, name)(*tuple(args), **kwargs)
 
         return forward_function

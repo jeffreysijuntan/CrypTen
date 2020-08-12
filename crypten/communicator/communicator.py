@@ -210,13 +210,13 @@ def _logging(func):
             elif "batched" in kwargs and kwargs["batched"]:
                 nbytes = sum(x.nelement() for x in args[0])
                 self._log_communication(nbytes)
-            else:  # one tensor communicated
+            elif isinstance(args[0], torch.Tensor):  # one tensor communicated
                 self._log_communication(args[0].nelement())
 
-            tic = timeit.timeit()
+            tic = timeit.default_timer()
             result = func(self, *args, **kwargs)
-            toc = timeit.timeit()
-
+            toc = timeit.default_timer()
+            
             self._log_communication_time(toc - tic)
             return result
 
