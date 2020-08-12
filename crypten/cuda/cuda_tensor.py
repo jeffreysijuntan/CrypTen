@@ -199,6 +199,11 @@ class CUDALongTensor(object):
 
         c_z = c_out if op in ["conv1d", "conv2d"] else c_in
 
+        if "groups" in kwargs:
+            kwargs["groups"] *= nb2
+        else:
+            kwarg["group"] = nb2
+
         z_encoded = getattr(torch, op)(
             x_enc_span, y_enc_span, *args, **kwargs, groups=nb2
         )
