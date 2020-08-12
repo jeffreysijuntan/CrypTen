@@ -202,7 +202,7 @@ class CUDALongTensor(object):
         if "groups" in kwargs:
             kwargs["groups"] *= nb2
         else:
-            kwarg["group"] = nb2
+            kwargs["groups"] = nb2
 
         z_encoded = getattr(torch, op)(
             x_enc_span, y_enc_span, *args, **kwargs, groups=nb2
