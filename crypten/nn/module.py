@@ -356,7 +356,8 @@ class Module:
         for name, param in self._parameters.items():
             self.set_parameter(name, param.to(*args, **kwargs))
         for name, buffer in self._buffers.items():
-            self.set_buffer(name, buffer.to(*args, **kwargs))
+            if not isinstance(buffer, torch.Size):
+                self.set_buffer(name, buffer.to(*args, **kwargs))
 
         for module in self.modules():
             module.to(*args, **kwargs)
