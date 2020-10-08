@@ -14,6 +14,7 @@ import crypten.common
 import crypten.communicator as comm
 import crypten.mpc  # noqa: F401
 import crypten.nn  # noqa: F401
+import crypten.optim  # noqa: F401
 import torch
 
 # other imports:
@@ -433,6 +434,15 @@ def rand(*sizes, cryptensor_type=None, device=None):
     if cryptensor_type is None:
         cryptensor_type = get_default_cryptensor_type()
     return __CRYPTENSOR_TYPES__[cryptensor_type].rand(*sizes, device=device)
+
+
+def randn(*sizes, cryptensor_type=None):
+    """
+    Returns a tensor with normally distributed elements.
+    """
+    if cryptensor_type is None:
+        cryptensor_type = get_default_cryptensor_type()
+    return __CRYPTENSOR_TYPES__[cryptensor_type].randn(*sizes)
 
 
 def bernoulli(tensor, cryptensor_type=None):

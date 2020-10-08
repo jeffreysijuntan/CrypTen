@@ -205,7 +205,7 @@ class CUDALongTensor(object):
             kwargs["groups"] = nb2
 
         z_encoded = getattr(torch, op)(
-            x_enc_span, y_enc_span, *args, **kwargs
+            x_enc_span, y_enc_span, *args, **kwargs, groups=nb2
         )
         z_encoded = z_encoded.reshape(bs, nb2, c_z, *z_encoded.size()[2:]).transpose_(
             0, 1

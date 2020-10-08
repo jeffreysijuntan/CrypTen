@@ -5,8 +5,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import itertools
 import logging
-import os
 import unittest
 from test.multiprocess_test_case import (
     MultiProcessTestCase,
@@ -237,7 +237,7 @@ class TestNN(object):
             "Gather": (0,),
             "MatMul": (),
             "Mean": ([0], True),
-            "Reshape": (),
+            "Reshape": ((2, 2),),
             "Shape": (),
             "Sub": (),
             "Sum": ([0], True),
@@ -257,7 +257,7 @@ class TestNN(object):
             "Mean": lambda x: torch.mean(
                 x, dim=module_args["Mean"][0], keepdim=(module_args["Mean"][1] == 1)
             ),
-            "Reshape": lambda x: x[0].reshape(x[1]),
+            "Reshape": lambda x: x[0].reshape(module_args["Reshape"][0]),
             "Shape": lambda x: torch.tensor(x.size()).float(),
             "Sub": lambda x: x[0] - x[1],
             "Sum": lambda x: torch.sum(
@@ -285,10 +285,7 @@ class TestNN(object):
             "Transpose": (1, 2, 3, 4),
             "Unsqueeze": (8, 3),
         }
-        additional_inputs = {
-            "Gather": torch.tensor([[1, 2], [0, 3]]),
-            "Reshape": torch.Size([2, 2]),
-        }
+        additional_inputs = {"Gather": torch.tensor([[1, 2], [0, 3]])}
         module_attributes = {
             # each attribute has two parameters: the name, and a bool indicating
             # whether the value should be wrapped into a list when the module is created
@@ -366,6 +363,8 @@ class TestNN(object):
                 local_attr["keepdims"] = (
                     1 if module_args["ReduceMean"][1] is True else 0
                 )
+            if module_name == "Reshape":
+                local_attr["shape"] = module_args["Reshape"][0]
 
             # compare model outputs using the from_onnx static function
             module = getattr(crypten.nn, module_name).from_onnx(attributes=local_attr)
@@ -381,7 +380,8 @@ class TestNN(object):
 
         # input arguments for modules and input sizes:
         module_args = {
-            "AdaptiveAvgPool2d": (2,),
+            "AdaptiveAvgPool2d": ((7, 7),),
+            "AdaptiveMaxPool2d": ((3, 3),),
             "AvgPool2d": (2,),
             # "BatchNorm1d": (400,),  # FIXME: Unit tests claim gradients are incorrect.
             # "BatchNorm2d": (3,),
@@ -399,7 +399,8 @@ class TestNN(object):
             "LogSoftmax": (0,),
         }
         input_sizes = {
-            "AdaptiveAvgPool2d": (1, 3, 32, 32),
+            "AdaptiveAvgPool2d": (1, 2, 24, 24),
+            "AdaptiveMaxPool2d": (1, 3, 8, 8),
             "AvgPool2d": (1, 3, 32, 32),
             "BatchNorm1d": (8, 400),
             "BatchNorm2d": (8, 3, 32, 32),
@@ -418,82 +419,92 @@ class TestNN(object):
         }
 
         # loop over all modules:
-        for module_name in module_args.keys():
-            for compute_gradients in [True, False]:
+        for module_name, from_pytorch, compute_gradients in itertools.product(
+            module_args.keys(), [False, True], [False, True]
+        ):
+            # generate inputs:
+            input = get_random_test_tensor(size=input_sizes[module_name], is_float=True)
+            input.requires_grad = True
+            encr_input = crypten.cryptensor(input)
+            encr_input.requires_grad = compute_gradients
 
-                # generate inputs:
-                input = get_random_test_tensor(
-                    size=input_sizes[module_name], is_float=True
-                )
-                input.requires_grad = True
-                encr_input = crypten.cryptensor(input)
-                encr_input.requires_grad = compute_gradients
+            # create PyTorch module:
+            args = module_args[module_name]
+            module = getattr(torch.nn, module_name)(*args)
+            module.train()
 
-                # create PyTorch module:
-                module = getattr(torch.nn, module_name)(*module_args[module_name])
-                module.train()
-
-                # create encrypted CrypTen module:
+            # create encrypted CrypTen module:
+            if from_pytorch:
                 encr_module = crypten.nn.from_pytorch(module, input)
-
-                # check that module properly encrypts / decrypts and
-                # check that encrypting with current mode properly performs no-op
-                for encrypted in [False, True, True, False, True]:
-                    encr_module.encrypt(mode=encrypted)
-                    if encrypted:
-                        self.assertTrue(encr_module.encrypted, "module not encrypted")
-                    else:
-                        self.assertFalse(encr_module.encrypted, "module encrypted")
-                    for key in ["weight", "bias"]:
-                        if hasattr(module, key):  # if PyTorch model has key
-                            encr_param = None
-
-                            # find that key in the crypten.nn.Graph:
-                            if isinstance(encr_module, crypten.nn.Graph):
-                                for encr_node in encr_module.modules():
-                                    if hasattr(encr_node, key):
-                                        encr_param = getattr(encr_node, key)
-                                        break
-
-                            # or get it from the crypten Module directly:
-                            else:
-                                encr_param = getattr(encr_module, key)
-
-                            # compare with reference:
-                            # NOTE: Because some parameters are initialized randomly
-                            # with different values on each process, we only want to
-                            # check that they are consistent with source parameter value
-                            reference = getattr(module, key)
-                            src_reference = comm.get().broadcast(reference, src=0)
-                            msg = "parameter %s in %s incorrect" % (key, module_name)
-                            if not encrypted:
-                                encr_param = crypten.cryptensor(encr_param)
-                            self._check(encr_param, src_reference, msg)
-
-                # compare model outputs:
-                self.assertTrue(encr_module.training, "training value incorrect")
-                reference = module(input)
-                encr_output = encr_module(encr_input)
-                self._check(encr_output, reference, "%s forward failed" % module_name)
-
-                # test backward pass:
-                reference.sum().backward()
-                encr_output.sum().backward()
-                if compute_gradients:
-                    self._check(
-                        encr_input.grad,
-                        input.grad,
-                        "%s backward on input failed" % module_name,
-                    )
-                else:
-                    self.assertIsNone(encr_input.grad)
+            # TODO: Remove continue call once AdaptiveAvgPool2d is supported
+            elif module_name == "AdaptiveAvgPool2d":
+                continue
+            else:
+                encr_module = getattr(crypten.nn, module_name)(*args)
                 for name, param in module.named_parameters():
-                    encr_param = getattr(encr_module, name)
-                    self._check(
-                        encr_param.grad,
-                        param.grad,
-                        "%s backward on %s failed" % (module_name, name),
-                    )
+                    setattr(encr_module, name, param)
+
+            # check that module properly encrypts / decrypts and
+            # check that encrypting with current mode properly performs no-op
+            for encrypted in [False, True, True, False, True]:
+                encr_module.encrypt(mode=encrypted)
+                if encrypted:
+                    self.assertTrue(encr_module.encrypted, "module not encrypted")
+                else:
+                    self.assertFalse(encr_module.encrypted, "module encrypted")
+                for key in ["weight", "bias"]:
+                    if hasattr(module, key):  # if PyTorch model has key
+                        # find that key in the crypten.nn.Graph:
+                        if isinstance(encr_module, crypten.nn.Graph):
+                            for encr_node in encr_module.modules():
+                                if hasattr(encr_node, key):
+                                    encr_param = getattr(encr_node, key)
+                                    break
+
+                        # or get it from the crypten Module directly:
+                        else:
+                            encr_param = getattr(encr_module, key)
+
+                        # compare with reference:
+                        # NOTE: Because some parameters are initialized randomly
+                        # with different values on each process, we only want to
+                        # check that they are consistent with source parameter value
+                        reference = getattr(module, key)
+                        src_reference = comm.get().broadcast(reference, src=0)
+                        msg = "parameter %s in %s incorrect" % (key, module_name)
+                        if not encrypted:
+                            encr_param = crypten.cryptensor(encr_param, src=0)
+                        self._check(encr_param, src_reference, msg)
+
+            # compare model outputs:
+            self.assertTrue(encr_module.training, "training value incorrect")
+            reference = module(input)
+            encr_output = encr_module(encr_input)
+
+            msg = "from_pytorch" if from_pytorch else ""
+            self._check(encr_output, reference, f"{module_name} forward failed {msg}")
+
+            # test backward pass:
+            reference.sum().backward()
+            encr_output.sum().backward()
+            if compute_gradients:
+                self.assertIsNotNone(
+                    encr_input.grad, f"{module_name} grad failed to populate {msg}."
+                )
+                self._check(
+                    encr_input.grad,
+                    input.grad,
+                    f"{module_name} backward on input failed {msg}",
+                )
+            else:
+                self.assertIsNone(encr_input.grad)
+            for name, param in module.named_parameters():
+                encr_param = getattr(encr_module, name)
+                self._check(
+                    encr_param.grad,
+                    param.grad,
+                    f"{module_name} backward on {name} failed {msg}",
+                )
 
     def test_linear(self):
         """
@@ -542,6 +553,15 @@ class TestNN(object):
                         param.grad,
                         "Linear backward on %s failed" % name,
                     )
+
+    def test_inplace_warning(self):
+        """Tests that a warning is thrown that indicates that the `inplace` kwarg
+        is ignored when a module is initialized with `inplace=True`
+        """
+        modules = ["Dropout", "DropoutNd", "Dropout2d", "Dropout3d", "ReLU"]
+        for module in modules:
+            with self.assertWarns(UserWarning):
+                getattr(crypten.nn, module)(inplace=True)
 
     def test_sequential(self):
         """
@@ -718,6 +738,43 @@ class TestNN(object):
         self._check(model.sample_param, tensor2, "parameter __getattr__ failed")
         self.assertTrue(
             isinstance(model.fc1, crypten.nn.Linear), "modules __getattr__ failed"
+        )
+
+        """
+        assign to model.weight should change model._parameters["weight"]
+        """
+        model.fc1.weight = torch.nn.Parameter(torch.zeros((2, 3)))
+
+        self.assertEqual(
+            model.fc1._parameters["weight"].tolist(),
+            torch.nn.Parameter(torch.zeros((2, 3))).tolist(),
+        )
+
+        """
+        assign to  model._parameters["weight"] should change model.weight
+        """
+        model.fc1._parameters["weight"] = torch.nn.Parameter(torch.ones((2, 3)))
+        self.assertEqual(
+            model.fc1.weight.tolist(), torch.nn.Parameter(torch.ones((2, 3))).tolist()
+        )
+
+        """
+        assign to  model._buffers["bufferedItem"] should change model.bufferedItem
+        """
+        model.fc1._buffers["bufferedItem"] = torch.nn.Parameter(torch.ones((2, 3)))
+        self.assertEqual(
+            model.fc1.bufferedItem.tolist(),
+            torch.nn.Parameter(torch.ones((2, 3))).tolist(),
+        )
+
+        """
+        assign to model.weight should change model._parameters["weight"]
+        """
+        model.fc1.bufferedItem = torch.nn.Parameter(torch.zeros((2, 3)))
+
+        self.assertEqual(
+            model.fc1._buffers["bufferedItem"].tolist(),
+            torch.nn.Parameter(torch.zeros((2, 3))).tolist(),
         )
 
     def test_training(self):
@@ -984,8 +1041,6 @@ class TestNN(object):
             """
             Checks if state_dict matches parameters in model.
             """
-            print(model)
-
             # get all parameters, buffers, and names from model:
             params_buffers = {}
             for func in ["named_parameters", "named_buffers"]:

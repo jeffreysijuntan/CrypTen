@@ -14,11 +14,10 @@ import torch
 import torch.distributed as dist
 from crypten.common.rng import generate_kbit_random_tensor, generate_random_ring_element
 from crypten.common.util import count_wraps, torch_stack
-from crypten.encoder import FixedPointEncoder
 from crypten.mpc.primitives import ArithmeticSharedTensor, BinarySharedTensor
 
 
-TTP_FUNCTIONS = ["additive", "square", "binary", "wraps", "B2A", "rand"]
+TTP_FUNCTIONS = ["additive", "square", "binary", "wraps", "B2A"]
 
 
 class TrustedThirdParty:
@@ -174,11 +173,10 @@ class TTPClient:
             dist.barrier(group=self.ttp_group)
 
             self.generator = torch.Generator(device="cpu")
-            self.generator.manual_seed(seed.item())
+            self.generator_cuda = torch.Generator(device="cuda")
 
-            if torch.cuda.is_available():
-                self.generator_cuda = torch.Generator(device="cuda")
-                self.generator_cuda.manual_seed(seed.item())
+            self.generator.manual_seed(seed.item())
+            self.generator_cuda.manual_seed(seed.item())
 
         def get_generator(self, device=None):
             if device is None:
@@ -278,13 +276,11 @@ class TTPServer:
             dist.isend(tensor=seeds[i], dst=i, group=self.ttp_group) for i in range(ws)
         ]
         self.generators = [torch.Generator(device="cpu") for _ in range(ws)]
-        if torch.cuda.is_available():
-            self.generators_cuda = [torch.Generator(device="cuda") for _ in range(ws)]
+        self.generators_cuda = [torch.Generator(device="cuda") for _ in range(ws)]
 
         for i in range(ws):
             self.generators[i].manual_seed(seeds[i].item())
-            if torch.cuda.is_available():
-                self.generators_cuda[i].manual_seed(seeds[i].item())
+            self.generators_cuda[i].manual_seed(seeds[i].item())
             reqs[i].wait()
 
         dist.barrier(group=self.ttp_group)
@@ -372,11 +368,3 @@ class TTPServer:
         rA = rB - self._get_additive_PRSS(size, remove_rank=True)
 
         return rA
-
-    def rand(self, *sizes, encoder=None):
-        if encoder is None:
-            encoder = FixedPointEncoder()  # use default precision
-
-        r = encoder.encode(torch.rand(*sizes, device=self.device))
-        r = r - self._get_additive_PRSS(sizes, remove_rank=True)
-        return r

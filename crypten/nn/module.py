@@ -6,10 +6,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import warnings
 from collections import OrderedDict
 
 import crypten
 import torch
+from crypten.common.util import adaptive_pool2d_helper
 
 
 class Module:
@@ -549,7 +551,6 @@ class Graph(Container):
         self._graph[name] = input_names
 
     def forward(self, input):
-
         # keep track of all values that have been computed:
         values = {self.input_name: input}
         computed = {key: False for key in self._graph.keys()}
@@ -960,16 +961,16 @@ class Reshape(Module):
         input (tuple): contains input tensor and shape (torch.Size)
     """
 
-    def forward(self, input):
-        assert isinstance(input, (list, tuple)), "input must be list or tuple"
-        tensor, shape = input
-        assert isinstance(shape, torch.Size), "shape must be torch.Size"
+    def __init__(self, shape):
+        super(Reshape, self).__init__()
+        self.shape = shape
 
-        return tensor.reshape(shape)
+    def forward(self, tensor):
+        return tensor.reshape(self.shape)
 
     @staticmethod
     def from_onnx(parameters=None, attributes=None):
-        return Reshape()
+        return Reshape(attributes["shape"])
 
 
 class Dropout(Module):
@@ -987,8 +988,12 @@ class Dropout(Module):
         - Output: :math:`(*)`. Output is of the same shape as input
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p=0.5, inplace=False):
         super().__init__()
+        if inplace:
+            warnings.warn(
+                "CrypTen Dropout module does not support inplace computation."
+            )
         self.p = p
 
     def forward(self, input):
@@ -1015,14 +1020,17 @@ class DropoutNd(Module):
         p (float, optional): probability of an element to be zero-ed.
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p=0.5, inplace=False):
         super().__init__()
+        if inplace:
+            warnings.warn(
+                "CrypTen DropoutNd module does not support inplace computation."
+            )
         self.p = p
 
     def forward(self, input):
         if self.training:
-            result = input._feature_dropout(p=self.p)
-            return result
+            return input._feature_dropout(p=self.p)
         return input
 
     @staticmethod
@@ -1122,10 +1130,10 @@ class _ConstantPad(Module):
     Module that pads a tensor.
     """
 
-    def __init__(self, padding, value, mode="constant"):
+    def __init__(self, padding, value, ndims, mode="constant"):
         super().__init__()
         if isinstance(padding, (int)):
-            padding = [padding]
+            padding = [padding, padding] * ndims
         self.padding = padding
         self.value = value
         self.mode = mode
@@ -1138,7 +1146,7 @@ class _ConstantPad(Module):
         if attributes is None:
             attributes = {}
         return _ConstantPad(
-            attributes["pads"], attributes["value"], mode=attributes["mode"]
+            attributes["pads"], attributes["value"], None, mode=attributes["mode"]
         )
 
 
@@ -1147,7 +1155,8 @@ class ConstantPad1d(_ConstantPad):
     Module that pads a 1D tensor.
     """
 
-    pass
+    def __init__(self, padding, value, mode="constant"):
+        super(ConstantPad1d, self).__init__(padding, value, 1, mode=mode)
 
 
 class ConstantPad2d(_ConstantPad):
@@ -1155,7 +1164,8 @@ class ConstantPad2d(_ConstantPad):
     Module that pads a 2D tensor.
     """
 
-    pass
+    def __init__(self, padding, value, mode="constant"):
+        super(ConstantPad2d, self).__init__(padding, value, 2, mode=mode)
 
 
 class ConstantPad3d(_ConstantPad):
@@ -1163,7 +1173,8 @@ class ConstantPad3d(_ConstantPad):
     Module that pads a 3D tensor.
     """
 
-    pass
+    def __init__(self, padding, value, mode="constant"):
+        super(ConstantPad3d, self).__init__(padding, value, 3, mode=mode)
 
 
 class Linear(Module):
@@ -1597,6 +1608,11 @@ class ReLU(Module):
     :math:`\text{ReLU}(x)= \max(0, x)`
     """
 
+    def __init__(self, inplace=False):
+        super().__init__()
+        if inplace:
+            warnings.warn("CrypTen ReLU module does not support inplace computation.")
+
     def forward(self, x):
         return x.relu()
 
@@ -1722,7 +1738,7 @@ class _Pool2d(Module):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, pool_type, kernel_size, stride=1, padding=0):
+    def __init__(self, pool_type, kernel_size, stride=None, padding=0):
         super().__init__()
         self.pool_type = pool_type
         self.kernel_size = kernel_size
@@ -1809,7 +1825,7 @@ class AvgPool2d(_Pool2d):
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
     """
 
-    def __init__(self, kernel_size, stride=1, padding=0):
+    def __init__(self, kernel_size, stride=None, padding=0):
         super().__init__("average", kernel_size, stride=stride, padding=padding)
 
     @staticmethod
@@ -1824,7 +1840,7 @@ class MaxPool2d(_Pool2d):
     Module that performs 2D max pooling (see :meth:`AvgPool2d`)
     """
 
-    def __init__(self, kernel_size, stride=1, padding=0):
+    def __init__(self, kernel_size, stride=None, padding=0):
         super().__init__("max", kernel_size, stride=stride, padding=padding)
 
     @staticmethod
@@ -1832,6 +1848,97 @@ class MaxPool2d(_Pool2d):
         return super(MaxPool2d, MaxPool2d).from_onnx(
             "max", parameters=parameters, attributes=attributes
         )
+
+
+class AdaptiveAvgPool2d(Module):
+    r"""Applies a 2D adaptive average pooling over an input signal composed of several input planes.
+
+    The output is of size H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size of the image of the form H x W.
+                     Can be a tuple (H, W) or a single H for a square image H x H.
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
+
+    Examples:
+        >>> # target output size of 5x7
+        >>> m = nn.AdaptiveAvgPool2d((5,7))
+        >>> input = crypten.randn(1, 64, 8, 9)
+        >>> output = m(input)
+        >>> # target output size of 7x7 (square)
+        >>> m = nn.AdaptiveAvgPool2d(7)
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveAvgPool2d((None, 7))
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveAvgPool2d, self).__init__()
+        self.output_size = output_size
+
+    def extra_repr(self) -> str:
+        return "output_size={}".format(self.output_size)
+
+    def forward(self, input_tensor):
+        resized_input, args, kwargs = adaptive_pool2d_helper(
+            input_tensor, self.output_size, reduction="mean"
+        )
+        return resized_input.avg_pool2d(*args, **kwargs)
+
+    @staticmethod
+    def from_onnx(parameters=None, attributes=None):
+        return AdaptiveAvgPool2d(attributes["shape"])
+
+
+class AdaptiveMaxPool2d(Module):
+    r"""Applies a 2D adaptive max pooling over an input signal composed of several input planes.
+
+    The output is of size H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size of the image of the form H x W.
+                     Can be a tuple (H, W) or a single H for a square image H x H.
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
+
+    Examples:
+        >>> # target output size of 5x7
+        >>> m = nn.AdaptiveMaxPool2d((5,7))
+        >>> input = crypten.randn(1, 64, 8, 9)
+        >>> output = m(input)
+        >>> # target output size of 7x7 (square)
+        >>> m = nn.AdaptiveMaxPool2d(7)
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveMaxPool2d((None, 7))
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveMaxPool2d, self).__init__()
+        self.output_size = output_size
+
+    def extra_repr(self) -> str:
+        return "output_size={}".format(self.output_size)
+
+    def forward(self, input_tensor):
+        resized_input, args, kwargs = adaptive_pool2d_helper(
+            input_tensor, self.output_size, reduction="max"
+        )
+        return resized_input.max_pool2d(*args, **kwargs)
+
+    @staticmethod
+    def from_onnx(parameters=None, attributes=None):
+        return AdaptiveMaxPool2d(attributes["shape"])
 
 
 class GlobalAveragePool(Module):
