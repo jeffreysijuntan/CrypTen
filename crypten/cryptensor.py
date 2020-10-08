@@ -12,6 +12,11 @@ import torch
 from .gradients import AutogradContext, get_grad_fn
 
 
+# list of all static functions that CrypTensors support:
+STATIC_FUNCTIONS = ["cat", "stack"]
+STATIC_FUNCTION_MAPPING = {getattr(torch, name): name for name in STATIC_FUNCTIONS}
+
+
 def _find_all_cryptensors(inputs):
     """
     Recursively find all CrypTensors in an input list, tuple, set, or dict.
@@ -35,7 +40,7 @@ class CrypTensorMetaclass(type):
     """
 
     def __getattribute__(cls, name):
-        if name in ["cat", "stack"]:
+        if name in STATIC_FUNCTIONS:
             dummy = cls(None)
             dummy.__IS_DUMMY__ = True
             return cls.__getattribute__(dummy, name)
@@ -231,6 +236,20 @@ class CrypTensor(object, metaclass=CrypTensorMetaclass):
         clone.requires_grad = False
         return clone
 
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        """Allows torch static functions to work on CrypTensors."""
+        if kwargs is None:
+            kwargs = {}
+        if func in STATIC_FUNCTION_MAPPING:
+            import crypten
+
+            # dispatch torch.{cat,stack} call on CrypTensor to CrypTen:
+            return getattr(crypten, STATIC_FUNCTION_MAPPING[func])(*args, **kwargs)
+        else:
+            raise NotImplementedError(
+                f"CrypTen does not support torch function {func}."
+            )
+
     def __getattribute__(self, name):
         """
         Makes sure that any function call on the tensor gets recorded in order
@@ -276,7 +295,6 @@ class CrypTensor(object, metaclass=CrypTensorMetaclass):
                 else:
                     remove_tuple = False
 
-                # we only need to build up forward graph if requires_grad is True:
                 if requires_grad:
 
                     # maintain references to children and context in result:
@@ -629,6 +647,27 @@ class CrypTensor(object, metaclass=CrypTensorMetaclass):
         """2D convolution."""
         raise NotImplementedError("conv2d is not implemented")
 
+    def avg_pool2d(self, kernel_size, stride=None, padding=0):
+        """Perform an average pooling on each 2D matrix of the given tensor
+
+        Args:
+            kernel_size (int or tuple): pooling kernel size.
+        """
+        raise NotImplementedError("avg_pool2d is not implemented")
+
+    def adaptive_avg_pool2d(self, output_size):
+        r"""
+        Applies a 2D adaptive average pooling over an input signal composed of
+        several input planes.
+
+        See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+
+        Args:
+            output_size: the target output size (single integer or
+                double-integer tuple)
+        """
+        raise NotImplementedError("adaptive_avg_pool2d is not implemented")
+
     def max_pool2d(self, kernel_size, padding=None, stride=None, return_indices=False):
         """Applies a 2D max pooling over an input signal composed of several
         input planes.
@@ -677,6 +716,19 @@ class CrypTensor(object, metaclass=CrypTensorMetaclass):
         the correct mapping.
         """
         raise NotImplementedError("_max_pool2d_backward is not implemented")
+
+    def adaptive_max_pool2d(self, output_size, return_indices=False):
+        r"""Applies a 2D adaptive max pooling over an input signal composed of
+        several input planes.
+
+        See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
+
+        Args:
+            output_size: the target output size (single integer or
+                double-integer tuple)
+            return_indices: whether to return pooling indices. Default: ``False``
+        """
+        raise NotImplementedError("adaptive_max_pool2d is not implemented")
 
     def dropout(self, p=0.5, training=True, inplace=False):
         r"""

@@ -258,15 +258,30 @@ class TestGradients:
                 # Check dim 0 if tensor is 0-dimensional
                 dims = 1 if tensor.dim() == 0 else tensor.dim()
                 for dim in range(dims):
+
+                    # check when keepdim is not provided as a kwarg
+                    if method is None:
+                        self._check_forward_backward(reduction, tensor, dim=dim)
+                    else:
+                        with crypten.mpc.ConfigManager("max_method", method):
+                            self._check_forward_backward(reduction, tensor, dim=dim)
+
+                    # check when keepdim is provided as a kwarg
                     for keepdim in [False, True]:
                         if method is None:
                             self._check_forward_backward(
                                 reduction, tensor, dim, keepdim=keepdim
                             )
+                            self._check_forward_backward(
+                                reduction, tensor, dim=dim, keepdim=keepdim
+                            )
                         else:
                             with crypten.mpc.ConfigManager("max_method", method):
                                 self._check_forward_backward(
                                     reduction, tensor, dim, keepdim=keepdim
+                                )
+                                self._check_forward_backward(
+                                    reduction, tensor, dim=dim, keepdim=keepdim
                                 )
 
     def test_matmul(self):
@@ -623,45 +638,49 @@ class TestGradients:
             self._check_forward_backward("clone", tensor)
 
     def test_cat_stack(self):
-        for func in ["cat", "stack"]:
-            for dimensions in range(1, 5):
-                size = [5] * dimensions
-                for num_tensors in range(1, 5):
-                    for dim in range(dimensions):
-                        tensors = [
-                            get_random_test_tensor(size=size, is_float=True)
-                            for _ in range(num_tensors)
-                        ]
-                        encrypted_tensors = [
-                            crypten.cryptensor(t, requires_grad=True) for t in tensors
-                        ]
-                        for i in range(len(tensors)):
-                            tensors[i].grad = None
-                            tensors[i].requires_grad = True
-                            encrypted_tensors[i].grad = None
-                            encrypted_tensors[i].requires_grad = True
+        for module in [crypten, torch]:  # torch.cat on CrypTensor runs crypten.cat
+            for func in ["cat", "stack"]:
+                for dimensions in range(1, 5):
+                    size = [5] * dimensions
+                    for num_tensors in range(1, 5):
+                        for dim in range(dimensions):
+                            tensors = [
+                                get_random_test_tensor(size=size, is_float=True)
+                                for _ in range(num_tensors)
+                            ]
+                            encrypted_tensors = [
+                                crypten.cryptensor(t, requires_grad=True)
+                                for t in tensors
+                            ]
+                            for i in range(len(tensors)):
+                                tensors[i].grad = None
+                                tensors[i].requires_grad = True
+                                encrypted_tensors[i].grad = None
+                                encrypted_tensors[i].requires_grad = True
 
-                        # Forward
-                        reference = getattr(torch, func)(tensors, dim=dim)
-                        encrypted_out = getattr(crypten, func)(
-                            encrypted_tensors, dim=dim
-                        )
-                        self._check(encrypted_out, reference, f"{func} forward failed")
-
-                        # Backward
-                        grad_output = get_random_test_tensor(
-                            size=reference.size(), is_float=True
-                        )
-                        encrypted_grad_output = crypten.cryptensor(grad_output)
-
-                        reference.backward(grad_output)
-                        encrypted_out.backward(encrypted_grad_output)
-                        for i in range(len(tensors)):
-                            self._check(
-                                encrypted_tensors[i].grad,
-                                tensors[i].grad,
-                                f"{func} backward failed",
+                            # Forward
+                            reference = getattr(torch, func)(tensors, dim=dim)
+                            encrypted_out = getattr(module, func)(
+                                encrypted_tensors, dim=dim
                             )
+                            self._check(
+                                encrypted_out, reference, f"{func} forward failed"
+                            )
+
+                            # Backward
+                            grad_output = get_random_test_tensor(
+                                size=reference.size(), is_float=True
+                            )
+                            encrypted_grad_output = crypten.cryptensor(grad_output)
+
+                            reference.backward(grad_output)
+                            encrypted_out.backward(encrypted_grad_output)
+                            for i in range(len(tensors)):
+                                self._check(
+                                    encrypted_tensors[i].grad,
+                                    tensors[i].grad,
+                                    f"{func} backward failed",
+                                )
 
     def test_dropout(self):
         """Tests forward for dropout"""
@@ -903,6 +922,21 @@ class TestGradients:
                     tensor.grad,
                     f"{func} backward failed with index {index}",
                 )
+
+    def test_index_select(self):
+        """Tests index_select gradients"""
+        sizes = [(2, 2), (3, 5), (3, 5, 10), (4, 8, 2, 5)]
+        for size in sizes:
+            tensor = get_random_test_tensor(size=size, is_float=True)
+            for dim in range(len(size)):
+                for index_size in range(size[dim]):
+                    index = get_random_test_tensor(
+                        max_value=(size[dim] - 1),
+                        min_value=0,
+                        size=(index_size,),
+                        is_float=False,
+                    )
+                    self._check_forward_backward("index_select", tensor, dim, index)
 
     def test_take(self):
         """Tests take gradients"""

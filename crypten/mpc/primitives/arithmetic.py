@@ -16,6 +16,7 @@ from crypten.common.tensor_types import is_float_tensor, is_int_tensor, is_tenso
 from crypten.common.util import torch_cat, torch_stack
 from crypten.cryptensor import CrypTensor
 from crypten.cuda import CUDALongTensor
+from crypten.debug import debug_mode
 from crypten.encoder import FixedPointEncoder
 
 from . import beaver
@@ -358,6 +359,10 @@ class ArithmeticSharedTensor(object):
             y = y.long()
 
         if isinstance(y, int) or is_int_tensor(y):
+            if debug_mode():
+                tolerance = 1.0
+                tensor = self.get_plain_text()
+
             # Truncate protocol for dividing by public integers:
             if comm.get().get_world_size() > 2:
                 wraps = self.wraps()
@@ -368,6 +373,13 @@ class ArithmeticSharedTensor(object):
                 self -= wraps * 4 * (int(2 ** 62) // y)
             else:
                 self.share //= y
+
+            if debug_mode():
+                if not torch.lt(
+                    torch.abs(self.get_plain_text() * y - tensor), tolerance
+                ).all():
+                    raise ValueError("Final result of division is incorrect.")
+
             return self
 
         # Otherwise multiply by reciprocal
@@ -507,24 +519,25 @@ class ArithmeticSharedTensor(object):
             raise TypeError("scatter_add second tensor of unsupported type")
         return self
 
-    def avg_pool2d(self, kernel_size, *args, **kwargs):
+    def avg_pool2d(self, kernel_size, stride=None, padding=0):
         """Perform an average pooling on each 2D matrix of the given tensor
 
         Args:
             kernel_size (int or tuple): pooling kernel size.
         """
-        z = self.sum_pool2d(kernel_size, *args, **kwargs)
+        z = self._sum_pool2d(kernel_size, stride=stride, padding=padding)
         if isinstance(kernel_size, (int, float)):
             pool_size = kernel_size ** 2
         else:
             pool_size = kernel_size[0] * kernel_size[1]
         return z / pool_size
 
-    def sum_pool2d(self, *args, **kwargs):
+    def _sum_pool2d(self, kernel_size, stride=None, padding=0):
         """Perform a sum pooling on each 2D matrix of the given tensor"""
         result = self.shallow_copy()
+
         result.share = torch.nn.functional.avg_pool2d(
-            self.share, *args, **kwargs, divisor_override=1
+            self.share, kernel_size, stride=stride, padding=padding, divisor_override=1
         )
         return result
 
