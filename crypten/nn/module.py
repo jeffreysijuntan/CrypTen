@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -6,10 +7,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import warnings
 from collections import OrderedDict
 
 import crypten
 import torch
+from crypten.common.util import adaptive_pool2d_helper
 
 
 class Module:
@@ -60,21 +63,63 @@ class Module:
         """Sets the module in evaluation mode."""
         return self.train(False)
 
+    def children(self):
+        """Returns an iterator over immediate children modules.
+        Yields:
+            Module: a child module
+        """
+        for name, module in self.named_children():
+            yield module
+
+    def named_children(self):
+        """Returns an iterator over immediate children modules, yielding both
+        the name of the module as well as the module itself.
+        Yields:
+            (string, Module): Tuple containing a name and child module
+        Example::
+            >>> for name, module in model.named_children():
+            >>>     if name in ['conv4', 'conv5']:
+            >>>         print(module)
+        """
+        memo = set()
+        for name, module in self._modules.items():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield name, module
+
     def register_module(self, name, module):
         """Registers child module in the module."""
         self._modules[name] = module
 
     def modules(self):
-        """Returns iterator over modules (non-recursively)."""
-        # TODO: Add option to do this recursively, akin to PyTorch.
+        """Returns an iterator over all modules in the network.
+        Yields:
+            Module: a module in the network
+        Note:
+            Duplicate modules are returned only once.
+        """
         for _, module in self.named_modules():
             yield module
 
-    def named_modules(self):
-        """Returns iterator over named modules (non-recursively)."""
-        # TODO: Add option to do this recursively, akin to PyTorch.
-        for name, module in self._modules.items():
-            yield name, module
+    def named_modules(self, memo=None, prefix=''):
+        """Returns an iterator over all modules in the network, yielding
+        both the name of the module as well as the module itself.
+        Yields:
+            (string, Module): Tuple of name and module
+        Note:
+            Duplicate modules are returned only once.
+        """
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            memo.add(self)
+            yield prefix, self
+            for name, module in self._modules.items():
+                if module is None:
+                    continue
+                submodule_prefix = prefix + ('.' if prefix else '') + name
+                for m in module.named_modules(memo, submodule_prefix):
+                    yield m
 
     def register_parameter(self, name, param, requires_grad=True):
         """
@@ -106,11 +151,9 @@ class Module:
         """
         Sets value of parameter in the module from shares. This functionality is
         only for MPC-encrypted models.
-
         Supported named arguments for `MPCTensor` parameters include the `precision`
         of the encoder (default = `None`), the rank of the `src` (default = 0),
         and the `ptype` of the shares (default = `crypten.mpc.arithmetic`).
-
         This function cannot set the parameters in child modules.
         """
 
@@ -127,20 +170,49 @@ class Module:
         self._parameters[name] = cls.from_shares(share, **kwargs)
         setattr(self, name, self._parameters[name])
 
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        """Helper method for yielding various names + members of modules."""
+        memo = set()
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
     def parameters(self, recurse=True):
-        """Iterator over parameters."""
+        """Returns an iterator over module parameters.
+        This is typically passed to an optimizer.
+        Args:
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
+        Yields:
+            CrypTensor or torch.Tensor: module parameter
+        """
         for _, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, recurse=True, prefix=None):
-        """Iterator over named parameters."""
-        for name, param in self._parameters.items():
-            param_name = name if prefix is None else prefix + "." + name
-            yield param_name, param
-        if recurse:
-            for module_name, module in self.named_modules():
-                pre = module_name if prefix is None else prefix + "." + module_name
-                yield from module.named_parameters(recurse=recurse, prefix=pre)
+    def named_parameters(self, recurse=True, prefix=''):
+        """
+        Returns an iterator over module parameters, yielding both the
+        name of the parameter as well as the parameter itself.
+        Args:
+            prefix (str): prefix to prepend to all parameter names.
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
+        Yields:
+            (string, CrypTensor or torch.Tensor): Tuple containing the name and parameter
+        """
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         """
@@ -265,7 +337,6 @@ class Module:
 
     def update_parameters(self, learning_rate, grad_threshold=100):
         """Performs gradient step on parameters.
-
         Parameters:
             grad_threshold - Because arithmetic operations can extremely rarely
                     return large incorrect results, we zero-out all elements
@@ -317,31 +388,47 @@ class Module:
         setattr(self, name, buffer)
 
     def buffers(self, recurse=True):
-        """Iterator over buffers."""
+        """Returns an iterator over module buffers.
+        Args:
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+        Yields:
+            CrypTensor or torch.Tensor: module buffer
+        """
         for _, buffer in self.named_buffers(recurse=recurse):
             yield buffer
 
-    def named_buffers(self, recurse=True, prefix=None):
-        """Iterator over named buffers."""
-        for name, buffer in self._buffers.items():
-            buffer_name = name if prefix is None else prefix + "." + name
-            yield buffer_name, buffer
-        if recurse:
-            for module_name, module in self.named_modules():
-                pre = module_name if prefix is None else prefix + "." + module_name
-                yield from module.named_buffers(recurse=recurse, prefix=pre)
+    def named_buffers(self, recurse=True, prefix=''):
+        """Returns an iterator over module buffers, yielding both the
+        name of the buffer as well as the buffer itself.
+        Args:
+            prefix (str): prefix to prepend to all buffer names.
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+        Yields:
+            (string, CrypTensor or torch.Tensor): Tuple containing the name and buffer
+        Example::
+            >>> for name, buf in self.named_buffers():
+            >>>    if name in ['running_var']:
+            >>>        print(buf.size())
+        """
+        gen = self._named_members(
+            lambda module: module._buffers.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
+
 
     def to(self, *args, **kwargs):
         """
         Moves and/or casts the parameters and buffers.
-
         This can be called as
-
         `to(device=None, dtype=None, non_blocking=False)`
         `to(dtype, non_blocking=False)`
         `to(tensor, non_blocking=False)`
         `to(memory_format=torch.channels_last)`
-
         Args:
             device (torch.device) – the desired device of the parameters
             and buffers in this module
@@ -351,13 +438,11 @@ class Module:
             desired dtype and device for all parameters and buffers in this module
             memory_format (torch.memory_format) – the desired memory format
             for 4D parameters and buffers in this module (keyword only argument)
-
         """
         for name, param in self._parameters.items():
             self.set_parameter(name, param.to(*args, **kwargs))
         for name, buffer in self._buffers.items():
-            if not isinstance(buffer, torch.Size):
-                self.set_buffer(name, buffer.to(*args, **kwargs))
+            self.set_buffer(name, buffer.to(*args, **kwargs))
 
         for module in self.modules():
             module.to(*args, **kwargs)
@@ -366,7 +451,6 @@ class Module:
     def cuda(self, device=None):
         """
         Moves all model parameters and buffers to the GPU.
-
         Args:
             device (int, optional) – if specified, all parameters will be copied
             to that device
@@ -449,12 +533,12 @@ class Module:
                 for idx, arg in enumerate(args):
                     if torch.is_tensor(arg):
                         args[idx] = crypten.cryptensor(arg)
-            # else:
-            #     if any(isinstance(arg, crypten.CrypTensor) for arg in args):
-            #         raise RuntimeError(
-            #             "Cannot input CrypTensors into unencrypted model."
-            #             "Encrypt the model before feeding it CrypTensors."
-            #         )
+            else:
+                if any(isinstance(arg, crypten.CrypTensor) for arg in args):
+                    raise RuntimeError(
+                        "Cannot input CrypTensors into unencrypted model."
+                        "Encrypt the model before feeding it CrypTensors."
+                    )
             return object.__getattribute__(self, name)(*tuple(args), **kwargs)
 
         return forward_function
@@ -527,7 +611,6 @@ class Container(Module):
 class Graph(Container):
     """
     Acyclic graph of modules.
-
     The module maintains a dict of named modules and a graph structure stored in
     a dict where each key is a module name, and the associated value is a list
     of module names that provide the input into the module.
@@ -549,7 +632,6 @@ class Graph(Container):
         self._graph[name] = input_names
 
     def forward(self, input):
-
         # keep track of all values that have been computed:
         values = {self.input_name: input}
         computed = {key: False for key in self._graph.keys()}
@@ -763,7 +845,6 @@ class Transpose(Module):
     tensor of shape (1, 2, 3), the output shape will be (2, 1, 3). Note
     that the signature of this module matches the ONNX specification
     and differs from `torch.transpose`
-
     Args:
         `perm`: list of ints
     """
@@ -791,19 +872,15 @@ class Transpose(Module):
 class Squeeze(Module):
     r"""
     Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
-
     For example, if `input` is of shape:
     :math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` tensor
     will be of shape: :math:`(A \times B \times C \times D)`.
-
     When :attr:`dimension` is given, a squeeze operation is done only in the given
     dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
     ``squeeze(input, 0)`` leaves the tensor unchanged, but ``squeeze(input, 1)``
     will squeeze the tensor to the shape :math:`(A \times B)`.
-
     .. note:: The returned tensor shares the storage with the input tensor,
             so changing the contents of one will change the contents of the other.
-
     Args:
         dimension (int, optional): if given, the input will be squeezed only in
             this dimension
@@ -833,12 +910,10 @@ class Unsqueeze(Module):
     Module that unsqueezes a tensor.
     Returns a new tensor with a dimension of size one inserted at the
     specified position.
-
     The returned tensor shares the same underlying data with this tensor.
     A :attr:`dimension` value within the range ``[-input.dim() - 1, input.dim() + 1)``
     can be used. Negative :attr:`dimension` will correspond to :meth:`unsqueeze`
     applied at :attr:`dimension` = ``dim + input.dim() + 1``.
-
     Args:
         dimension (int): the index at which to insert the singleton dimension
     """
@@ -865,7 +940,6 @@ class Unsqueeze(Module):
 class Flatten(Module):
     """
     Module that flattens the input tensor into a 2D matrix.
-
     Args:
         axis (int, optional): must not be larger than dimension
     """
@@ -919,7 +993,6 @@ class Shape(Module):
 class Concat(Module):
     """
     Module that concatenates tensors along a dimension.
-
     Args:
         dim (int, optional): the dimension over which to concatenate
     """
@@ -946,30 +1019,27 @@ class Reshape(Module):
     Module that reshapes tensors to new dimensions.
     Returns a tensor with same data and number of elements as :attr:`self`,
     but with the specified shape.
-
     When possible, the returned tensor will be a view
     of :attr:`self`. Otherwise, it will be a copy. Contiguous inputs and inputs
     with compatible strides can be reshaped without copying, but you should not
     depend on the copying vs. viewing behavior.
-
     See :meth:`torch.Tensor.view` on when it is possible to return a view.
     A single dimension may be -1, in which case it's inferred from the remaining
     dimensions and the number of elements in :attr:`self`.
-
     Args:
         input (tuple): contains input tensor and shape (torch.Size)
     """
 
-    def forward(self, input):
-        assert isinstance(input, (list, tuple)), "input must be list or tuple"
-        tensor, shape = input
-        assert isinstance(shape, torch.Size), "shape must be torch.Size"
+    def __init__(self, shape):
+        super(Reshape, self).__init__()
+        self.shape = shape
 
-        return tensor.reshape(shape)
+    def forward(self, tensor):
+        return tensor.reshape(self.shape)
 
     @staticmethod
     def from_onnx(parameters=None, attributes=None):
-        return Reshape()
+        return Reshape(attributes["shape"])
 
 
 class Dropout(Module):
@@ -978,17 +1048,19 @@ class Dropout(Module):
     distribution. Furthermore, the outputs are scaled by a factor of
     :math:`\frac{1}{1-p}` during training. This means that during evaluation
     the module simply computes an identity function.
-
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-
     Shape:
         - Input: :math:`(*)`. Input can be of any shape
         - Output: :math:`(*)`. Output is of the same shape as input
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p=0.5, inplace=False):
         super().__init__()
+        if inplace:
+            warnings.warn(
+                "CrypTen Dropout module does not support inplace computation."
+            )
         self.p = p
 
     def forward(self, input):
@@ -1010,19 +1082,21 @@ class DropoutNd(Module):
     batched input is a nD tensor :math:`\text{input}[i, j]`).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
-
     Args:
         p (float, optional): probability of an element to be zero-ed.
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p=0.5, inplace=False):
         super().__init__()
+        if inplace:
+            warnings.warn(
+                "CrypTen DropoutNd module does not support inplace computation."
+            )
         self.p = p
 
     def forward(self, input):
         if self.training:
-            result = input._feature_dropout(p=self.p)
-            return result
+            return input._feature_dropout(p=self.p)
         return input
 
     @staticmethod
@@ -1039,9 +1113,7 @@ class Dropout2d(DropoutNd):
     batched input is a 2D tensor :math:`\text{input}[i, j]`).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
-
     Usually the input comes from :class:`nn.Conv2d` modules.
-
     Args:
         p (float, optional): probability of an element to be zero-ed.
     Shape:
@@ -1062,12 +1134,9 @@ class Dropout3d(DropoutNd):
     batched input is a 3D tensor :math:`\text{input}[i, j]`).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
-
     Usually the input comes from :class:`nn.Conv3d` modules.
-
     Args:
         p (float, optional): probability of an element to be zeroed.
-
     Shape:
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
@@ -1090,7 +1159,6 @@ class Gather(Module):
     indices[i_{0}, ..., i_{q-1}]`. Then :math:`output[i_{0}, ..., i_{q-1}, j_{0},
     ..., j_{r-2}] = input[k, j_{0}, ..., j_{r-2}]`. This is an operation from the
     ONNX specification.
-
     Args:
         dimension (int): the axis along which to index
         index(tensor): the indices to select along the `dimension`
@@ -1122,10 +1190,10 @@ class _ConstantPad(Module):
     Module that pads a tensor.
     """
 
-    def __init__(self, padding, value, mode="constant"):
+    def __init__(self, padding, value, ndims, mode="constant"):
         super().__init__()
         if isinstance(padding, (int)):
-            padding = [padding]
+            padding = [padding, padding] * ndims
         self.padding = padding
         self.value = value
         self.mode = mode
@@ -1138,7 +1206,7 @@ class _ConstantPad(Module):
         if attributes is None:
             attributes = {}
         return _ConstantPad(
-            attributes["pads"], attributes["value"], mode=attributes["mode"]
+            attributes["pads"], attributes["value"], None, mode=attributes["mode"]
         )
 
 
@@ -1147,7 +1215,8 @@ class ConstantPad1d(_ConstantPad):
     Module that pads a 1D tensor.
     """
 
-    pass
+    def __init__(self, padding, value, mode="constant"):
+        super(ConstantPad1d, self).__init__(padding, value, 1, mode=mode)
 
 
 class ConstantPad2d(_ConstantPad):
@@ -1155,7 +1224,8 @@ class ConstantPad2d(_ConstantPad):
     Module that pads a 2D tensor.
     """
 
-    pass
+    def __init__(self, padding, value, mode="constant"):
+        super(ConstantPad2d, self).__init__(padding, value, 2, mode=mode)
 
 
 class ConstantPad3d(_ConstantPad):
@@ -1163,20 +1233,19 @@ class ConstantPad3d(_ConstantPad):
     Module that pads a 3D tensor.
     """
 
-    pass
+    def __init__(self, padding, value, mode="constant"):
+        super(ConstantPad3d, self).__init__(padding, value, 3, mode=mode)
 
 
 class Linear(Module):
     """
     Module that performs linear transformation.
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
-
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
-
     Shape:
         - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
           additional dimensions and :math:`H_{in} = \text{in\_features}`
@@ -1237,7 +1306,6 @@ class MatMul(Module):
         :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is
         a :math:`(k \times m \times p)` tensor, :attr:`out` will be an
         :math:`(j \times k \times n \times p)` tensor.
-
     Arguments:
         Option 1: [input1, input2]
             input1: first input matrix to be multiplied
@@ -1279,38 +1347,28 @@ class MatMul(Module):
 class Conv1d(Module):
     r"""
     Module that performs 1D convolution.
-
     Applies a 1D convolution over an input signal composed of several input
     planes.
-
     In the simplest case, the output value of the layer with input size
     :math:`(N, C_{\text{in}}, L)` and output :math:`(N, C_{\text{out}}, L_{\text{out}})`
     can be precisely described as:
-
     .. math::
         \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
         \sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k)
         \star \text{input}(N_i, k)
-
-
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     and :math:`L` is a length of signal sequence.
-
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
-
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
-
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
-
     * :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
-
         * At groups=1, all inputs are convolved to all outputs.
         * At groups=2, the operation becomes equivalent to having two conv
           layers side by side, each seeing half the input channels,
@@ -1319,15 +1377,12 @@ class Conv1d(Module):
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`,
     :attr:`dilation` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -1341,19 +1396,15 @@ class Conv1d(Module):
         Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output.
         Default: ``True``
-
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
         - Output: :math:`(N, C_{out}, L_{out})` where
-
           .. math::
               L_{out} = \left\lfloor\frac{L_{in}  +
               2 \times \text{padding} - \text{dilation} \times
               (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
-
     .. _cross-correlation:
         https://en.wikipedia.org/wiki/Cross-correlation
-
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """  # noqa: W605
@@ -1424,39 +1475,29 @@ class Conv1d(Module):
 class Conv2d(Module):
     r"""
     Module that performs 2D convolution.
-
     Applies a 2D convolution over an input signal composed of several input
     planes.
-
     In the simplest case, the output value of the layer with input size
     :math:`(N, C_{\text{in}}, H, W)` and output :math:`(N, C_{\text{out}},
     H_{\text{out}}, W_{\text{out}})` can be precisely described as:
-
     .. math::
         \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
         \sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k)
         \star \text{input}(N_i, k)
-
-
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
-
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
-
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
-
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
-
     * :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
-
         * At groups=1, all inputs are convolved to all outputs.
         * At groups=2, the operation becomes equivalent to having two conv
           layers side by side, each seeing half the input channels,
@@ -1465,15 +1506,12 @@ class Conv2d(Module):
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`,
     :attr:`dilation` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -1487,24 +1525,19 @@ class Conv2d(Module):
         Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output.
         Default: ``True``
-
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
-
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  +
               2 \times \text{padding}[0] - \text{dilation}[0] \times
               (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
-
           .. math::
               W_{out} = \left\lfloor\frac{W_{in}  +
               2 \times \text{padding}[1] - \text{dilation}[1] \times
               (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
-
     .. _cross-correlation:
         https://en.wikipedia.org/wiki/Cross-correlation
-
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
@@ -1593,9 +1626,13 @@ class Conv2d(Module):
 class ReLU(Module):
     r"""
     Module that computes rectified linear unit (ReLU) activations element-wise.
-
     :math:`\text{ReLU}(x)= \max(0, x)`
     """
+
+    def __init__(self, inplace=False):
+        super().__init__()
+        if inplace:
+            warnings.warn("CrypTen ReLU module does not support inplace computation.")
 
     def forward(self, x):
         return x.relu()
@@ -1607,7 +1644,6 @@ class ReLU(Module):
 
 class Sigmoid(Module):
     r"""Applies the element-wise function:
-
     .. math::
         \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
     """
@@ -1624,21 +1660,16 @@ class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range [0,1] and sum to 1.
-
     Softmax is defined as:
-
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
-
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(*)`, same shape as the input
-
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
-
     Arguments:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
@@ -1661,19 +1692,15 @@ class Softmax(Module):
 class LogSoftmax(Module):
     r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
     input Tensor. The LogSoftmax formulation can be simplified as:
-
     .. math::
         \text{LogSoftmax}(x_{i}) =
         \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
-
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(*)`, same shape as the input
-
     Arguments:
         dim (int): A dimension along which LogSoftmax will be computed.
-
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range \[-inf, 0\)
@@ -1698,31 +1725,26 @@ class _Pool2d(Module):
     Module that performs 2D pooling.
     Applies a 2D max or average pooling over an input signal composed of several input
     planes.
-
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on
     both sides for :attr:`padding` number of points. :attr:`dilation` controls
     the spacing between the kernel points. It is harder to describe, but this
     `link`_ has a nice visualization of what :attr:`dilation` does.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`,
     :attr:`dilation` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         pool_type (str): specifies "average" or "max" pooling
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
-
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, pool_type, kernel_size, stride=1, padding=0):
+    def __init__(self, pool_type, kernel_size, stride=None, padding=0):
         super().__init__()
         self.pool_type = pool_type
         self.kernel_size = kernel_size
@@ -1770,46 +1792,36 @@ class AvgPool2d(_Pool2d):
     r"""
     Module that Applies a 2D average pooling
     over an input signal composed of several input planes.
-
     In the simplest case, the output value of the layer with input size
     :math:`(N, C, H, W)`, output :math:`(N, C, H_{out}, W_{out})` and
     :attr:`kernel_size` :math:`(kH, kW)` can be precisely described as:
-
     .. math::
-
         out(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1}
         \sum_{n=0}^{kW-1} input(N_i, C_j, stride[0] \times h + m, stride[1]
         \times w + n)
-
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on
     both sides for :attr:`padding` number of points.
-
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
-
         - a single ``int`` -- in which case the same value is used for the
         height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for
         the height dimension, and the second `int` for the width dimension
-
     Args:
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
-
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})`, where
-
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
                 \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
-
           .. math::
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
     """
 
-    def __init__(self, kernel_size, stride=1, padding=0):
+    def __init__(self, kernel_size, stride=None, padding=0):
         super().__init__("average", kernel_size, stride=stride, padding=padding)
 
     @staticmethod
@@ -1824,7 +1836,7 @@ class MaxPool2d(_Pool2d):
     Module that performs 2D max pooling (see :meth:`AvgPool2d`)
     """
 
-    def __init__(self, kernel_size, stride=1, padding=0):
+    def __init__(self, kernel_size, stride=None, padding=0):
         super().__init__("max", kernel_size, stride=stride, padding=padding)
 
     @staticmethod
@@ -1832,6 +1844,90 @@ class MaxPool2d(_Pool2d):
         return super(MaxPool2d, MaxPool2d).from_onnx(
             "max", parameters=parameters, attributes=attributes
         )
+
+
+class AdaptiveAvgPool2d(Module):
+    r"""Applies a 2D adaptive average pooling over an input signal composed of several input planes.
+    The output is of size H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+    Args:
+        output_size: the target output size of the image of the form H x W.
+                     Can be a tuple (H, W) or a single H for a square image H x H.
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
+    Examples:
+        >>> # target output size of 5x7
+        >>> m = nn.AdaptiveAvgPool2d((5,7))
+        >>> input = crypten.randn(1, 64, 8, 9)
+        >>> output = m(input)
+        >>> # target output size of 7x7 (square)
+        >>> m = nn.AdaptiveAvgPool2d(7)
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveAvgPool2d((None, 7))
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveAvgPool2d, self).__init__()
+        self.output_size = output_size
+
+    def extra_repr(self) -> str:
+        return "output_size={}".format(self.output_size)
+
+    def forward(self, input_tensor):
+        resized_input, args, kwargs = adaptive_pool2d_helper(
+            input_tensor, self.output_size, reduction="mean"
+        )
+        return resized_input.avg_pool2d(*args, **kwargs)
+
+    @staticmethod
+    def from_onnx(parameters=None, attributes=None):
+        return AdaptiveAvgPool2d(attributes["shape"])
+
+
+class AdaptiveMaxPool2d(Module):
+    r"""Applies a 2D adaptive max pooling over an input signal composed of several input planes.
+    The output is of size H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+    Args:
+        output_size: the target output size of the image of the form H x W.
+                     Can be a tuple (H, W) or a single H for a square image H x H.
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
+    Examples:
+        >>> # target output size of 5x7
+        >>> m = nn.AdaptiveMaxPool2d((5,7))
+        >>> input = crypten.randn(1, 64, 8, 9)
+        >>> output = m(input)
+        >>> # target output size of 7x7 (square)
+        >>> m = nn.AdaptiveMaxPool2d(7)
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveMaxPool2d((None, 7))
+        >>> input = crypten.randn(1, 64, 10, 9)
+        >>> output = m(input)
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveMaxPool2d, self).__init__()
+        self.output_size = output_size
+
+    def extra_repr(self) -> str:
+        return "output_size={}".format(self.output_size)
+
+    def forward(self, input_tensor):
+        resized_input, args, kwargs = adaptive_pool2d_helper(
+            input_tensor, self.output_size, reduction="max"
+        )
+        return resized_input.max_pool2d(*args, **kwargs)
+
+    @staticmethod
+    def from_onnx(parameters=None, attributes=None):
+        return AdaptiveMaxPool2d(attributes["shape"])
 
 
 class GlobalAveragePool(Module):
